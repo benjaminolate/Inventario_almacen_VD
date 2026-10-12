@@ -1,0 +1,29 @@
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# Credenciales y configuración local (nunca subir)
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# Respaldos y exportaciones con datos reales del negocio
+respaldos/
+backups/
+*.sql
+*.sqlite
+*.db
+*.csv
+*.xlsx
+datos-reales/
+
+# Dependencias y builds (por si se agregan más adelante)
+node_modules/
+dist/
+*.log
