@@ -1,0 +1,439 @@
+-- =====================================================================
+-- Inventario Almacén: base de datos en Supabase (Postgres)
+--
+-- Cómo usarlo: en el panel de Supabase, abre "SQL Editor", pega todo este
+-- archivo y presiona "Run". Se puede volver a ejecutar sin perder datos.
+--
+-- Modelo:
+--   stock = último conteo + compras − ventas desde ese conteo (por producto)
+--   Todas las horas las pone el servidor, así varios celulares con la hora
+--   distinta no desordenan el cálculo.
+-- =====================================================================
+
+create extension if not exists pgcrypto;
+
+-- ---------------------------------------------------------------------
+-- Usuarios de la tienda
+-- ---------------------------------------------------------------------
+create table if not exists public.perfiles (
+  id      uuid primary key references auth.users(id) on delete cascade,
+  usuario text not null,
+  nombre  text not null,
+  rol     text not null default 'vendedor' check (rol in ('admin','vendedor')),
+  activo  boolean not null default false,
+  creado  timestamptz not null default now()
+);
+
+-- Es miembro activo de la tienda
+create or replace function public.es_miembro() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from perfiles where id = auth.uid() and activo);
+$$;
+
+create or replace function public.es_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from perfiles where id = auth.uid() and activo and rol = 'admin');
+$$;
+
+-- Para la pantalla de inicio de sesión: si todavía no hay administradora,
+-- se ofrece crear la primera cuenta.
+create or replace function public.hay_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from perfiles where rol = 'admin' and activo);
+$$;
+
+-- Cada cuenta nueva crea su perfil. La primera queda como administradora;
+-- las demás quedan inactivas hasta que la administradora las activa.
+create or replace function public.nuevo_perfil() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare primera boolean;
+begin
+  perform pg_advisory_xact_lock(4242);
+  primera := not exists (select 1 from perfiles where rol = 'admin');
+  insert into perfiles (id, usuario, nombre, rol, activo)
+  values (
+    new.id,
+    coalesce(nullif(new.raw_user_meta_data->>'usuario',''), split_part(new.email,'@',1)),
+    coalesce(nullif(new.raw_user_meta_data->>'nombre',''), split_part(new.email,'@',1)),
+    case when primera then 'admin' else 'vendedor' end,
+    primera
+  );
+  return new;
+end $$;
+
+drop trigger if exists al_crear_usuario on auth.users;
+create trigger al_crear_usuario after insert on auth.users
+  for each row execute function public.nuevo_perfil();
+
+-- Que nadie se quede sin administradora por error
+create or replace function public.cuidar_admins() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from perfiles where rol = 'admin' and activo) then
+    raise exception 'Debe quedar al menos una administradora activa';
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists al_cambiar_perfil on public.perfiles;
+create constraint trigger al_cambiar_perfil after update or delete on public.perfiles
+  deferrable initially deferred for each row execute function public.cuidar_admins();
+
+-- ---------------------------------------------------------------------
+-- Catálogo
+-- ---------------------------------------------------------------------
+create table if not exists public.productos (
+  id          uuid primary key default gen_random_uuid(),
+  nombre      text not null check (char_length(nombre) between 1 and 120),
+  sector      text not null,
+  precio      integer not null default 0 check (precio >= 0),
+  costo       integer not null default 0 check (costo >= 0),
+  minimo      integer not null default 3 check (minimo >= 0),
+  codigo      text unique,
+  tiene       boolean not null default true,       -- false = "No lo tenemos"
+  conteo_cant integer check (conteo_cant >= 0),
+  conteo_at   timestamptz,
+  aproximado  boolean not null default false,
+  creado      timestamptz not null default now(),
+  actualizado timestamptz not null default now()
+);
+
+create table if not exists public.movimientos (
+  id          uuid primary key default gen_random_uuid(),
+  producto_id uuid not null references public.productos(id),
+  tipo        text not null check (tipo in ('venta','compra','conteo')),
+  cantidad    integer not null check (cantidad >= 0),
+  precio      integer,           -- venta: precio unitario cobrado
+  costo       integer,           -- compra: costo unitario
+  proveedor   text,              -- compra
+  esperado    integer,           -- conteo: lo que decía el sistema
+  grupo       uuid,              -- misma venta o misma recepción
+  usuario_id  uuid references auth.users(id) default auth.uid(),
+  at          timestamptz not null default now()
+);
+create index if not exists movimientos_producto_at on public.movimientos (producto_id, at);
+create index if not exists movimientos_at on public.movimientos (at desc);
+
+-- Stock calculado: último conteo + compras − ventas posteriores al conteo
+create or replace view public.productos_stock with (security_invoker = true) as
+select p.*,
+  case when p.conteo_at is null then null else p.conteo_cant + coalesce((
+    select sum(case m.tipo when 'compra' then m.cantidad when 'venta' then -m.cantidad else 0 end)
+    from movimientos m where m.producto_id = p.id and m.at > p.conteo_at), 0)::int end as stock,
+  case when p.conteo_at is null then coalesce((
+    select sum(m.cantidad) from movimientos m where m.producto_id = p.id and m.tipo = 'venta'), 0)::int
+  else 0 end as ventas_sin_contar
+from public.productos p;
+
+-- Venta: [{"producto_id": "...", "cantidad": 2, "precio": 1990}, ...]
+create or replace function public.registrar_venta(items jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare g uuid := gen_random_uuid();
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  if jsonb_typeof(items) <> 'array' or jsonb_array_length(items) = 0 then raise exception 'Venta vacía'; end if;
+  insert into movimientos (producto_id, tipo, cantidad, precio, grupo, usuario_id)
+  select (i->>'producto_id')::uuid, 'venta', (i->>'cantidad')::int,
+         coalesce((i->>'precio')::int, p.precio), g, auth.uid()
+  from jsonb_array_elements(items) i join productos p on p.id = (i->>'producto_id')::uuid
+  where (i->>'cantidad')::int > 0;
+  return g;
+end $$;
+
+-- Recepción de mercadería: actualiza el costo y marca el producto como disponible
+create or replace function public.registrar_compra(proveedor text, items jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare g uuid := gen_random_uuid();
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  insert into movimientos (producto_id, tipo, cantidad, costo, proveedor, grupo, usuario_id)
+  select (i->>'producto_id')::uuid, 'compra', (i->>'cantidad')::int, (i->>'costo')::int,
+         nullif(trim(registrar_compra.proveedor), ''), g, auth.uid()
+  from jsonb_array_elements(items) i where (i->>'cantidad')::int > 0;
+  update productos p set costo = coalesce((i->>'costo')::int, p.costo), tiene = true, actualizado = now()
+  from jsonb_array_elements(items) i
+  where p.id = (i->>'producto_id')::uuid and (i->>'cantidad')::int > 0;
+  return g;
+end $$;
+
+-- Conteo de un sector:
+-- [{"producto_id": "...", "cantidad": 12, "aproximado": false, "tiene": true}, ...]
+-- "cantidad" puede venir vacía si solo se cambia "tiene". Devuelve las diferencias.
+create or replace function public.registrar_conteo(items jsonb)
+returns table (producto_id uuid, esperado integer, contado integer)
+language plpgsql security definer set search_path = public as $$
+declare i jsonb; pid uuid; q int; esp int; g uuid := gen_random_uuid();
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  for i in select * from jsonb_array_elements(items) loop
+    pid := (i->>'producto_id')::uuid;
+    if i ? 'tiene' and jsonb_typeof(i->'tiene') = 'boolean' then
+      update productos set tiene = (i->>'tiene')::boolean, actualizado = now() where id = pid;
+      if not (i->>'tiene')::boolean then continue; end if;
+    end if;
+    if coalesce(i->>'cantidad','') = '' then continue; end if;
+    q := greatest(0, (i->>'cantidad')::int);
+    select s.stock into esp from productos_stock s where s.id = pid;
+    update productos set conteo_cant = q, conteo_at = now(),
+      aproximado = coalesce((i->>'aproximado')::boolean, false), actualizado = now()
+    where id = pid;
+    insert into movimientos (producto_id, tipo, cantidad, esperado, grupo, usuario_id)
+    values (pid, 'conteo', q, esp, g, auth.uid());
+    producto_id := pid; esperado := esp; contado := q;
+    return next;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Fiados (no afectan el inventario)
+-- ---------------------------------------------------------------------
+create table if not exists public.clientes (
+  id       uuid primary key default gen_random_uuid(),
+  nombre   text not null check (char_length(nombre) between 1 and 80),
+  telefono text not null default '',
+  creado   timestamptz not null default now()
+);
+
+create table if not exists public.fiados (
+  id         uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references public.clientes(id) on delete cascade,
+  tipo       text not null check (tipo in ('fiado','abono')),
+  monto      integer not null check (monto > 0),
+  nota       text not null default '',
+  usuario_id uuid references auth.users(id) default auth.uid(),
+  at         timestamptz not null default now()
+);
+create index if not exists fiados_cliente on public.fiados (cliente_id, at);
+
+-- ---------------------------------------------------------------------
+-- Pan y reservas
+-- ---------------------------------------------------------------------
+create table if not exists public.ajustes (
+  clave text primary key,
+  valor jsonb not null
+);
+
+create table if not exists public.panes (
+  id     serial primary key,
+  nombre text not null unique,
+  activo boolean not null default true,
+  orden  integer not null default 0
+);
+
+-- Fecha de hoy en Chile
+create or replace function public.hoy_chile() returns date
+language sql stable as $$ select (now() at time zone 'America/Santiago')::date $$;
+
+create table if not exists public.reservas (
+  id        uuid primary key default gen_random_uuid(),
+  codigo    text not null,
+  nombre    text not null check (char_length(nombre) between 1 and 60),
+  telefono  text not null default '' check (char_length(telefono) <= 20),
+  items     jsonb not null,                     -- {"Marraquetas": 10, "Hallullas": 4}
+  detalle   text not null,                      -- "10 marraquetas, 4 hallullas"
+  nota      text not null default '' check (char_length(nota) <= 200),
+  dia       date not null default public.hoy_chile(),   -- día en que se retira
+  estado    text not null default 'pendiente' check (estado in ('pendiente','entregada','cancelada')),
+  creado    timestamptz not null default now(),
+  entregado_at  timestamptz,
+  entregado_por uuid references auth.users(id)
+);
+create index if not exists reservas_dia on public.reservas (dia, creado);
+
+-- Datos que ve el cliente en la página de reservas (sin iniciar sesión)
+create or replace function public.info_reservas() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'tienda',      coalesce((select valor #>> '{}' from ajustes where clave = 'tienda_nombre'), 'Almacén'),
+    'abiertas',    coalesce((select (valor #>> '{}')::boolean from ajustes where clave = 'reservas_abiertas'), true),
+    'hora_limite', coalesce((select (valor #>> '{}')::int from ajustes where clave = 'reservas_hora_limite'), 19),
+    'hora_chile',  extract(hour from now() at time zone 'America/Santiago')::int,
+    'hoy',         hoy_chile(),
+    'panes',       coalesce((select jsonb_agg(nombre order by orden, id) from panes where activo), '[]'::jsonb)
+  );
+$$;
+
+-- El cliente crea su reserva. p_para: 'hoy' o 'manana'
+create or replace function public.crear_reserva(p_nombre text, p_telefono text, p_items jsonb, p_para text, p_nota text default '')
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  info jsonb := info_reservas();
+  d date; k text; v jsonb; n int; total int := 0; det text := ''; limpio jsonb := '{}'::jsonb;
+  r reservas;
+begin
+  p_nombre := trim(coalesce(p_nombre,'')); p_telefono := regexp_replace(coalesce(p_telefono,''), '[^0-9+]', '', 'g');
+  if not (info->>'abiertas')::boolean then raise exception 'Las reservas están cerradas por ahora'; end if;
+  if char_length(p_nombre) < 2 or char_length(p_nombre) > 60 then raise exception 'Escribe tu nombre'; end if;
+  if char_length(p_telefono) > 20 then raise exception 'Teléfono no válido'; end if;
+  if p_para = 'hoy' then
+    if (info->>'hora_chile')::int >= (info->>'hora_limite')::int then raise exception 'Ya no se reciben reservas para hoy, elige mañana'; end if;
+    d := hoy_chile();
+  elsif p_para = 'manana' then d := hoy_chile() + 1;
+  else raise exception 'Día no válido'; end if;
+  if jsonb_typeof(p_items) <> 'object' then raise exception 'Elige qué pan quieres'; end if;
+  if exists (select 1 from jsonb_object_keys(p_items) x where not (info->'panes') ? x) then
+    raise exception 'Ese pan no está disponible';
+  end if;
+  -- Se recorre en el orden de la lista de panes para que el detalle salga ordenado
+  for k in select jsonb_array_elements_text(info->'panes') loop
+    v := p_items->k;
+    if v is null then continue; end if;
+    if jsonb_typeof(v) <> 'number' then raise exception 'Cantidad no válida'; end if;
+    n := (v #>> '{}')::numeric::int;
+    if n < 0 or n > 100 then raise exception 'Cantidad no válida'; end if;
+    if n = 0 then continue; end if;
+    total := total + n; limpio := limpio || jsonb_build_object(k, n);
+    det := det || case when det = '' then '' else ', ' end || n || ' ' || lower(k);
+  end loop;
+  if total = 0 then raise exception 'Elige qué pan quieres'; end if;
+  if total > 200 then raise exception 'Para pedidos grandes, habla directo con el almacén'; end if;
+  -- Freno contra abuso: no más de 40 reservas en 10 minutos en total
+  if (select count(*) from reservas where creado > now() - interval '10 minutes') >= 40 then
+    raise exception 'Hay muchas reservas en este momento, intenta en unos minutos';
+  end if;
+  insert into reservas (codigo, nombre, telefono, items, detalle, nota, dia)
+  values (upper(substr(encode(gen_random_bytes(3),'hex'),1,4)), p_nombre, p_telefono, limpio, det,
+          left(trim(coalesce(p_nota,'')), 200), d)
+  returning * into r;
+  return jsonb_build_object('id', r.id, 'codigo', r.codigo, 'dia', r.dia, 'detalle', r.detalle);
+end $$;
+
+-- El cliente revisa o cancela su reserva con el id que le quedó guardado
+create or replace function public.estado_reserva(p_id uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('id', id, 'codigo', codigo, 'nombre', nombre, 'detalle', detalle, 'dia', dia, 'estado', estado)
+  from reservas where id = p_id;
+$$;
+
+create or replace function public.cancelar_reserva(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  update reservas set estado = 'cancelada' where id = p_id and estado = 'pendiente';
+  return estado_reserva(p_id);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Permisos (Row Level Security)
+-- Solo los miembros activos ven y cambian datos. Los clientes de la página
+-- de reservas solo pueden usar las funciones de reservas de arriba.
+-- ---------------------------------------------------------------------
+alter table public.perfiles    enable row level security;
+alter table public.productos   enable row level security;
+alter table public.movimientos enable row level security;
+alter table public.clientes    enable row level security;
+alter table public.fiados      enable row level security;
+alter table public.ajustes     enable row level security;
+alter table public.panes       enable row level security;
+alter table public.reservas    enable row level security;
+
+do $$
+declare t text;
+begin
+  -- Borra las políticas anteriores para poder volver a ejecutar el archivo
+  for t in select format('drop policy %I on %I.%I', policyname, schemaname, tablename)
+           from pg_policies where schemaname = 'public' loop
+    execute t;
+  end loop;
+end $$;
+
+create policy "ver mi perfil o el equipo" on public.perfiles for select to authenticated
+  using (id = auth.uid() or es_miembro());
+create policy "admin cambia perfiles" on public.perfiles for update to authenticated
+  using (es_admin()) with check (es_admin());
+
+create policy "miembros ven productos"     on public.productos for select to authenticated using (es_miembro());
+create policy "miembros agregan productos" on public.productos for insert to authenticated with check (es_miembro());
+create policy "miembros editan productos"  on public.productos for update to authenticated using (es_miembro()) with check (es_miembro());
+
+-- Los movimientos solo se crean con las funciones registrar_*; nadie los edita ni borra
+create policy "miembros ven movimientos" on public.movimientos for select to authenticated using (es_miembro());
+
+create policy "miembros ven clientes"     on public.clientes for select to authenticated using (es_miembro());
+create policy "miembros agregan clientes" on public.clientes for insert to authenticated with check (es_miembro());
+create policy "miembros editan clientes"  on public.clientes for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "admin borra clientes"      on public.clientes for delete to authenticated using (es_admin());
+
+create policy "miembros ven fiados"    on public.fiados for select to authenticated using (es_miembro());
+create policy "miembros anotan fiados" on public.fiados for insert to authenticated
+  with check (es_miembro() and usuario_id = auth.uid());
+create policy "admin borra fiados"     on public.fiados for delete to authenticated using (es_admin());
+
+create policy "miembros ven ajustes"    on public.ajustes for select to authenticated using (es_miembro());
+create policy "miembros cambian ajustes" on public.ajustes for all to authenticated using (es_miembro()) with check (es_miembro());
+
+create policy "miembros ven panes"  on public.panes for select to authenticated using (es_miembro());
+create policy "admin cambia panes"  on public.panes for all to authenticated using (es_admin()) with check (es_admin());
+
+create policy "miembros ven reservas"     on public.reservas for select to authenticated using (es_miembro());
+create policy "miembros cambian reservas" on public.reservas for update to authenticated using (es_miembro()) with check (es_miembro());
+
+-- Las funciones internas no se exponen a visitantes sin sesión
+revoke execute on function public.nuevo_perfil() from public, anon, authenticated;
+revoke execute on function public.cuidar_admins() from public, anon, authenticated;
+revoke execute on function public.registrar_venta(jsonb) from public, anon;
+revoke execute on function public.registrar_compra(text, jsonb) from public, anon;
+revoke execute on function public.registrar_conteo(jsonb) from public, anon;
+grant execute on function public.registrar_venta(jsonb), public.registrar_compra(text, jsonb),
+  public.registrar_conteo(jsonb) to authenticated;
+grant execute on function public.hay_admin(), public.info_reservas(), public.hoy_chile(),
+  public.crear_reserva(text, text, jsonb, text, text), public.estado_reserva(uuid),
+  public.cancelar_reserva(uuid) to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- Cambios en vivo (Realtime): los celulares de la tienda se actualizan solos
+-- ---------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+  foreach t in array array['productos','movimientos','clientes','fiados','reservas','ajustes','perfiles','panes'] loop
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Datos iniciales (solo si las tablas están vacías)
+-- ---------------------------------------------------------------------
+insert into public.ajustes (clave, valor) values
+  ('tienda_nombre', '"Almacén"'),
+  ('mensaje_pan', '"🍞 ¡Llegó el pan calentito! Marraquetas y hallullas recién salidas. Los esperamos en el almacén."'),
+  ('reservas_abiertas', 'true'),
+  ('reservas_hora_limite', '19')
+on conflict (clave) do nothing;
+
+insert into public.panes (nombre, orden)
+select x.nombre, x.orden from (values ('Marraquetas',1),('Hallullas',2),('Pan amasado',3),('Dobladitas',4),('Pan integral',5)) x(nombre, orden)
+where not exists (select 1 from public.panes);
+
+-- Catálogo típico de almacén (precios de referencia; se ajustan en la app)
+insert into public.productos (nombre, sector, precio, costo, minimo)
+select x.* from (values
+ ('Coca-Cola 1,5 L','Bebidas',1990,1300,6),('Coca-Cola 3 L','Bebidas',2990,2050,6),('Coca-Cola Zero 1,5 L','Bebidas',1990,1300,3),
+ ('Sprite 1,5 L','Bebidas',1790,1150,3),('Fanta 1,5 L','Bebidas',1790,1150,3),('Pepsi 1,5 L','Bebidas',1690,1080,3),
+ ('Bilz 1,5 L','Bebidas',1590,1000,3),('Pap 1,5 L','Bebidas',1590,1000,3),('Agua mineral sin gas 1,6 L','Bebidas',990,560,6),
+ ('Agua mineral con gas 1,6 L','Bebidas',990,560,3),
+ ('Jugo en caja naranja 1 L','Jugos',1290,820,6),('Jugo en caja durazno 1 L','Jugos',1290,820,3),('Jugo en caja piña 1 L','Jugos',1290,820,3),
+ ('Néctar individual 200 ml','Jugos',450,260,6),('Jugo en polvo sobre','Jugos',150,80,6),
+ ('Leche entera 1 L','Lácteos',1150,820,6),('Leche descremada 1 L','Lácteos',1150,820,3),('Yogur batido 125 g','Lácteos',350,210,6),
+ ('Mantequilla 250 g','Lácteos',2490,1750,3),('Queso laminado 250 g','Lácteos',2990,2100,3),
+ ('Arroz grado 2, 1 kg','Abarrotes',1490,980,6),('Fideos espirales 400 g','Abarrotes',790,480,6),('Fideos spaghetti 400 g','Abarrotes',790,480,6),
+ ('Azúcar 1 kg','Abarrotes',1190,820,6),('Harina 1 kg','Abarrotes',1090,720,3),('Sal 1 kg','Abarrotes',490,280,3),
+ ('Aceite maravilla 1 L','Abarrotes',2690,1890,6),('Té 20 bolsitas','Abarrotes',990,610,3),('Café instantáneo 170 g','Abarrotes',4990,3500,3),
+ ('Pan de molde','Abarrotes',2190,1500,6),
+ ('Lentejas 1 kg','Legumbres',1990,1350,3),('Porotos 1 kg','Legumbres',2490,1700,3),('Garbanzos 1 kg','Legumbres',2290,1550,3),
+ ('Arvejas partidas 500 g','Legumbres',1190,780,3),
+ ('Galletas de agua','Galletas',690,420,6),('Galletas de soda','Galletas',690,420,6),('Galletas rellenas chocolate','Galletas',590,350,6),
+ ('Galletas rellenas vainilla','Galletas',590,350,6),('Galletas de vino','Galletas',890,560,3),
+ ('Atún lomitos en lata','Conservas',2290,1550,3),('Jurel en lata','Conservas',1990,1300,3),('Choclo en lata','Conservas',1190,760,3),
+ ('Salsa de tomate 200 g','Conservas',590,350,6),('Duraznos en almíbar','Conservas',1890,1250,3),
+ ('Papas fritas 110 g','Snacks',1490,950,6),('Ramitas 90 g','Snacks',1090,690,3),('Maní salado 100 g','Snacks',990,620,3),
+ ('Chocolate 100 g','Snacks',1390,900,6),('Chicle','Snacks',200,110,6),
+ ('Papel higiénico 4 rollos','Aseo',2490,1700,3),('Lavaloza 500 ml','Aseo',1490,950,3),('Cloro 1 L','Aseo',990,600,3),
+ ('Detergente en polvo 1 kg','Aseo',3490,2400,3),('Jabón de tocador','Aseo',450,270,3)
+) x(nombre, sector, precio, costo, minimo)
+where not exists (select 1 from public.productos);

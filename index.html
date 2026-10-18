@@ -131,6 +131,7 @@ nav.tabs button[aria-current="page"]{color:var(--brand)}
 <div id="modalroot"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="config.js"></script>
 <script>
 (function(){
 "use strict";
@@ -257,24 +258,32 @@ function seedExtras(){
   };
 }
 
+// ---------- Modo: demo (datos en este navegador) o tienda (base de datos compartida) ----------
+const CFG = window.ALMACEN_CONFIG || {};
+const DB_READY = !!(CFG.supabaseUrl && CFG.supabaseAnonKey);
+const SB_SRC = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js";
+let MODE = null;      // "demo" | "db"; null mientras se inicia sesión
+let sb = null;        // cliente de Supabase
+const isDB = () => MODE === "db";
+
 let S;
 function load(){ try { const raw = localStorage.getItem(KEY); if (raw) { S = JSON.parse(raw); } } catch(e){}
   if (!S) S = buildSeed();
   if (!S.clients){ Object.assign(S, seedExtras()); save(); } }
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} }
-load();
 
 const ui = { view:"inicio", cart:[], recv:{ supplier:"Distribuidora Ejemplo", items:[] }, sector:null, draft:{}, prodFilter:"Todos", prodQuery:"", histFilter:"todos" };
 
 const P = id => S.products.find(p => p.id === id);
 function stockOf(p){
+  if (isDB()) return p.stock;
   if (p.countAt == null) return null;
   let s = p.countQty;
   for (const m of S.movs){ if (m.pid !== p.id || m.at <= p.countAt) continue;
     if (m.type === "compra") s += m.qty; else if (m.type === "venta") s -= m.qty; }
   return s;
 }
-function pendingSales(p){ return S.movs.filter(m => m.pid === p.id && m.type === "venta").reduce((a,m)=>a+m.qty,0); }
+function pendingSales(p){ if (isDB()) return p.pend || 0; return S.movs.filter(m => m.pid === p.id && m.type === "venta").reduce((a,m)=>a+m.qty,0); }
 function ago(t){
   const diff = Date.now() - t, d0 = new Date(); d0.setHours(0,0,0,0);
   const hm = new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});
@@ -293,6 +302,197 @@ function stockPill(p){
   return `<span class="pill ok">${s}${est} en stock</span>`;
 }
 function toast(msg){ const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+
+// ---------- Base de datos compartida (Supabase) ----------
+// En modo tienda, S es una copia en memoria de la base de datos: se carga al entrar,
+// se mantiene al día con los cambios en vivo de los otros celulares y cada acción
+// se guarda primero en el servidor (que pone la hora) antes de mostrarse.
+const db = { profile:null, team:{}, panes:[], ajustes:{}, channel:null, loadedAt:0, joined:false };
+const iso = t => t ? Date.parse(t) : null;
+const prodFromRow = r => ({ id:r.id, name:r.nombre, cat:r.sector, price:r.precio, cost:r.costo, min:r.minimo, barcode:r.codigo || "",
+  has:r.tiene, countQty:r.conteo_cant, countAt:iso(r.conteo_at), estimated:r.aproximado, stock:r.stock, pend:r.ventas_sin_contar, pop:0 });
+const movFromRow = r => ({ id:r.id, pid:r.producto_id, type:r.tipo, qty:r.cantidad, price:r.precio, cost:r.costo, supplier:r.proveedor, expected:r.esperado, at:iso(r.at), user:r.usuario_id });
+const cliFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono || "", items:[] });
+const fiaFromRow = r => ({ id:r.id, type:r.tipo, amount:r.monto, note:r.nota, at:iso(r.at), user:r.usuario_id });
+const resFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono, detail:r.detalle, items:r.items, note:r.nota, codigo:r.codigo, dia:r.dia, estado:r.estado, done:r.estado === "entregada", at:iso(r.creado) });
+const userName = id => db.team[id]?.nombre || "";
+const hoyChile = (plusDays = 0) => new Intl.DateTimeFormat("en-CA", { timeZone:"America/Santiago" }).format(new Date(Date.now() + plusDays*D));
+const userEmail = u => { u = u.trim().toLowerCase(); return u.includes("@") ? u : u.replace(/\s+/g, ".") + "@" + (CFG.dominioUsuarios || "almacen.local"); };
+
+function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("sin conexión")); document.head.appendChild(s); }); }
+async function q(req){ const { data, error } = await req; if (error) throw error; return data; }
+// Supabase entrega hasta 1000 filas por consulta: se piden de a bloques
+async function all(build){ const out = []; for (let from = 0; ; from += 1000){ const rows = await q(build().range(from, from + 999)); out.push(...rows); if (rows.length < 1000) return out; } }
+function upsert(list, obj){ const cur = list.find(x => x.id === obj.id); if (cur) return Object.assign(cur, obj); list.push(obj); return obj; }
+function friendly(e){
+  const m = (e && (e.message || e.error_description)) || String(e || "");
+  if (e?.code === "23505") return "Ese código de barras ya está en otro producto";
+  if (/Failed to fetch|NetworkError|Load failed|sin conexión/i.test(m)) return "Sin conexión a internet. No se guardó; intenta de nuevo.";
+  if (/Invalid login credentials/i.test(m)) return "Usuario o contraseña incorrectos";
+  if (/already registered/i.test(m)) return "Ese usuario ya existe";
+  if (/Password should be/i.test(m)) return "La contraseña debe tener al menos 6 caracteres";
+  return m || "Algo salió mal";
+}
+let busy = false;
+async function run(fn){ if (busy) return; busy = true; try { return await fn(); } catch(e){ console.error(e); toast(friendly(e)); } finally { busy = false; } }
+
+async function dbLoadAll(){
+  const since = new Date(Date.now() - 8*D).toISOString();
+  const [prods, movs, clients, fiados, res, aj, panes, team] = await Promise.all([
+    all(() => sb.from("productos_stock").select("*").order("nombre")),
+    all(() => sb.from("movimientos").select("*").gte("at", since).order("at")),
+    all(() => sb.from("clientes").select("*").order("creado")),
+    all(() => sb.from("fiados").select("*").order("at")),
+    all(() => sb.from("reservas").select("*").gte("dia", hoyChile()).order("creado")),
+    q(sb.from("ajustes").select("*")),
+    q(sb.from("panes").select("*").order("orden")),
+    q(sb.from("perfiles").select("*").order("creado"))
+  ]);
+  const cs = clients.map(cliFromRow), byId = Object.fromEntries(cs.map(c => [c.id, c]));
+  fiados.forEach(f => byId[f.cliente_id]?.items.push(fiaFromRow(f)));
+  db.ajustes = Object.fromEntries(aj.map(a => [a.clave, a.valor]));
+  db.panes = panes; db.team = Object.fromEntries(team.map(t => [t.id, t]));
+  db.profile = db.team[db.profile.id] || db.profile;
+  // Se reemplaza el contenido manteniendo los mismos objetos de productos, por si hay una ventana abierta
+  const prev = S?.products || [];
+  S = { products: prods.map(r => { const o = prodFromRow(r), cur = prev.find(p => p.id === o.id); return cur ? Object.assign(cur, o) : o; }),
+    movs: movs.map(movFromRow), clients: cs, reservas: res.map(resFromRow), panMsg: db.ajustes.mensaje_pan || "" };
+  db.loadedAt = Date.now();
+}
+async function fetchProducts(ids){
+  ids = [...new Set(ids)].filter(Boolean); if (!ids.length) return;
+  const rows = await q(sb.from("productos_stock").select("*").in("id", ids));
+  rows.forEach(r => upsert(S.products, prodFromRow(r)));
+}
+// Trae los movimientos nuevos (los propios y los de otros celulares)
+async function syncMovs(){
+  const last = S.movs.reduce((a, m) => Math.max(a, m.at), Date.now() - 8*D);
+  const rows = await all(() => sb.from("movimientos").select("*").gte("at", new Date(last - 60e3).toISOString()).order("at"));
+  rows.forEach(r => { if (!S.movs.some(m => m.id === r.id)) S.movs.push(movFromRow(r)); });
+  S.movs.sort((a, b) => a.at - b.at);
+}
+const later = { pids:new Set(), t:null, full:null };
+function refreshSoon(pid){ later.pids.add(pid); clearTimeout(later.t); later.t = setTimeout(() => { const ids = [...later.pids]; later.pids.clear(); fetchProducts(ids).then(softRender, () => {}); }, 200); }
+function reloadSoon(){ clearTimeout(later.full); later.full = setTimeout(() => dbLoadAll().then(softRender, () => {}), 400); }
+// Redibuja sin interrumpir a quien está escribiendo en un campo
+let renderWaiting = false;
+function softRender(){
+  if (!MODE) return;
+  const a = document.activeElement;
+  if (a && $("#app").contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)){
+    if (!renderWaiting){ renderWaiting = true; a.addEventListener("blur", () => { renderWaiting = false; setTimeout(softRender, 50); }, { once:true }); }
+    return;
+  }
+  const y = window.scrollY; render(); window.scrollTo(0, y);
+}
+function dbSubscribe(){
+  if (db.channel) sb.removeChannel(db.channel);
+  const ch = db.channel = sb.channel("tienda");
+  const on = (table, fn) => ch.on("postgres_changes", { event:"*", schema:"public", table }, fn);
+  on("movimientos", ({ eventType, new:r }) => { if (eventType !== "INSERT") return reloadSoon();
+    if (!S.movs.some(m => m.id === r.id)){ S.movs.push(movFromRow(r)); S.movs.sort((a, b) => a.at - b.at); }
+    refreshSoon(r.producto_id); });
+  on("productos", ({ new:r, old:o }) => refreshSoon(r?.id || o?.id));
+  on("clientes", ({ eventType, new:r }) => { if (eventType === "DELETE") return reloadSoon();
+    const c = S.clients.find(c => c.id === r.id); if (c) Object.assign(c, { name:r.nombre, phone:r.telefono || "" }); else S.clients.push(cliFromRow(r)); softRender(); });
+  on("fiados", ({ eventType, new:r }) => { if (eventType !== "INSERT") return reloadSoon();
+    const c = S.clients.find(c => c.id === r.cliente_id); if (!c) return reloadSoon();
+    if (!c.items.some(i => i.id === r.id)) c.items.push(fiaFromRow(r)); softRender(); });
+  on("reservas", ({ eventType, new:r }) => { if (eventType === "DELETE") return reloadSoon(); if (r.dia < hoyChile()) return;
+    const isNew = !S.reservas.some(x => x.id === r.id); upsert(S.reservas, resFromRow(r));
+    if (isNew && eventType === "INSERT"){ toast(`Nueva reserva de pan: ${r.nombre}`); try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch(e){} }
+    softRender(); });
+  on("ajustes", ({ new:r }) => { if (!r?.clave) return; db.ajustes[r.clave] = r.valor; if (r.clave === "mensaje_pan") S.panMsg = r.valor; softRender(); });
+  on("perfiles", reloadSoon);
+  on("panes", reloadSoon);
+  // Al reconectarse (por ejemplo, el celular estuvo bloqueado) se recarga todo para no perder cambios
+  ch.subscribe(st => { if (st === "SUBSCRIBED"){ if (db.joined) reloadSoon(); db.joined = true; } });
+}
+
+// ---------- Acciones: cada cambio pasa por aquí, en modo demo o con base de datos ----------
+const act = {
+  async sale(lines){
+    if (!isDB()){ const now = Date.now(); lines.forEach(l => S.movs.push({ id:uid(), pid:l.pid, type:"venta", qty:l.qty, at:now, price:P(l.pid).price })); save(); return; }
+    await q(sb.rpc("registrar_venta", { items: lines.map(l => ({ producto_id:l.pid, cantidad:l.qty, precio:P(l.pid).price })) }));
+    await Promise.all([syncMovs(), fetchProducts(lines.map(l => l.pid))]);
+  },
+  async receive(supplier, items){
+    items = items.filter(l => l.qty > 0);
+    if (!isDB()){ const now = Date.now(); items.forEach(l => { const p = P(l.pid); p.cost = l.cost; p.has = true; S.movs.push({ id:uid(), pid:l.pid, type:"compra", qty:l.qty, at:now, cost:l.cost, supplier }); }); save(); return; }
+    await q(sb.rpc("registrar_compra", { proveedor:supplier, items: items.map(l => ({ producto_id:l.pid, cantidad:l.qty, costo:l.cost })) }));
+    await Promise.all([syncMovs(), fetchProducts(items.map(l => l.pid))]);
+  },
+  // draft: { pid: { qty, est, none } }. Devuelve cuántos se contaron y las diferencias
+  async count(draft){
+    const diffs = []; let n = 0;
+    if (!isDB()){
+      const now = Date.now();
+      for (const [pid, d] of Object.entries(draft)){
+        const p = P(pid);
+        if (d.none === true){ p.has = false; continue; }
+        if (d.none === false) p.has = true;
+        if (d.qty === "" || d.qty == null) continue;
+        const c = Math.max(0, parseInt(d.qty, 10) || 0);
+        const expected = stockOf(p);
+        if (expected != null && expected !== c) diffs.push([p, expected, c]);
+        p.countQty = c; p.countAt = now; p.estimated = !!d.est; n++;
+        S.movs.push({ id:uid(), pid, type:"conteo", qty:c, expected, at:now });
+      }
+      save(); return { n, diffs };
+    }
+    const items = Object.entries(draft).map(([pid, d]) => ({ producto_id:pid, cantidad: d.qty === "" || d.qty == null ? null : Math.max(0, parseInt(d.qty, 10) || 0),
+      aproximado: !!d.est, ...(d.none === true ? { tiene:false } : d.none === false ? { tiene:true } : {}) }));
+    if (!items.length) return { n, diffs };
+    const rows = await q(sb.rpc("registrar_conteo", { items }));
+    await Promise.all([syncMovs(), fetchProducts(items.map(i => i.producto_id))]);
+    rows.forEach(r => { n++; if (r.esperado != null && r.esperado !== r.contado) diffs.push([P(r.producto_id), r.esperado, r.contado]); });
+    return { n, diffs };
+  },
+  async updateProduct(p, f){
+    if (!isDB()){ Object.assign(p, f); save(); return p; }
+    const map = { name:"nombre", price:"precio", cost:"costo", min:"minimo", barcode:"codigo" }, cols = { actualizado:new Date().toISOString() };
+    for (const k in f) if (map[k]) cols[map[k]] = k === "barcode" ? (f[k] || null) : f[k];
+    await q(sb.from("productos").update(cols).eq("id", p.id));
+    await fetchProducts([p.id]); return P(p.id);
+  },
+  async newProduct(f, qty){
+    if (!isDB()){
+      const p = { id:"n"+uid(), name:f.name, cat:f.cat, price:f.price, cost:Math.round(f.price*0.65), pop:0, barcode:f.barcode, min:3, has:true, countQty:null, countAt:null, estimated:false };
+      if (qty !== ""){ p.countQty = Math.max(0, parseInt(qty,10)||0); p.countAt = Date.now(); S.movs.push({ id:uid(), pid:p.id, type:"conteo", qty:p.countQty, expected:null, at:p.countAt }); }
+      S.products.push(p); save(); return p;
+    }
+    const row = await q(sb.from("productos").insert({ nombre:f.name, sector:f.cat, precio:f.price, costo:Math.round(f.price*0.65), codigo:f.barcode || null }).select().single());
+    if (qty !== "") await q(sb.rpc("registrar_conteo", { items:[{ producto_id:row.id, cantidad:Math.max(0, parseInt(qty,10)||0) }] }));
+    await Promise.all([syncMovs(), fetchProducts([row.id])]);
+    return P(row.id);
+  },
+  async newClient(name, phone){
+    if (!isDB()){ const c = { id:"c"+uid(), name, phone, items:[] }; S.clients.push(c); save(); return c; }
+    const row = await q(sb.from("clientes").insert({ nombre:name, telefono:phone }).select().single());
+    return upsert(S.clients, cliFromRow(row));
+  },
+  async clientMov(c, type, amount, note){
+    if (!isDB()){ c.items.push({ id:uid(), type, amount, note, at:Date.now() }); save(); return; }
+    const row = await q(sb.from("fiados").insert({ cliente_id:c.id, tipo:type, monto:amount, nota:note }).select().single());
+    if (!c.items.some(i => i.id === row.id)) c.items.push(fiaFromRow(row));
+  },
+  async setting(clave, valor){
+    if (!isDB()) return;
+    db.ajustes[clave] = valor;
+    await q(sb.from("ajustes").upsert({ clave, valor }));
+  },
+  async panMsg(text){
+    S.panMsg = text;
+    if (!isDB()){ save(); return; }
+    clearTimeout(act._pm); act._pm = setTimeout(() => act.setting("mensaje_pan", text).catch(e => toast(friendly(e))), 700);
+  },
+  async reserva(r, estado){
+    if (!isDB()){ r.done = estado === "entregada"; save(); return; }
+    const cols = { estado, entregado_at: estado === "entregada" ? new Date().toISOString() : null, entregado_por: estado === "entregada" ? db.profile.id : null };
+    const row = await q(sb.from("reservas").update(cols).eq("id", r.id).select().single());
+    upsert(S.reservas, resFromRow(row));
+  }
+};
 
 // ---------- Escaneo de códigos de barras ----------
 async function decodeFile(file){
@@ -383,8 +583,8 @@ function openScanSheet(cb, error){
     <p class="small muted" style="margin:0">Saca la foto de cerca, con buena luz y el código derecho. Si la cámara no se abre, saca la foto con la app de cámara y elígela con el segundo botón.</p>
     <div class="field"><label for="scanCode">O escribe el número del código</label>
       <div class="searchbar"><input class="input code" id="scanCode" inputmode="numeric" placeholder="7801234567890"><button class="btn" id="scanGo">Buscar</button></div></div>
-    <div class="field"><label>Para probar la demo sin cámara</label>
-      <div class="row"><button class="btn sm" data-code="7800000000011">Coca-Cola 1,5 L</button><button class="btn sm" data-code="7800000000028">Coca-Cola 3 L</button><button class="btn sm" data-code="7801234000099">Código nuevo</button></div></div>
+    ${isDB() ? "" : `<div class="field"><label>Para probar la demo sin cámara</label>
+      <div class="row"><button class="btn sm" data-code="7800000000011">Coca-Cola 1,5 L</button><button class="btn sm" data-code="7800000000028">Coca-Cola 3 L</button><button class="btn sm" data-code="7801234000099">Código nuevo</button></div></div>`}
   </div>`);
   if (!error) startLive(cb); else { const n = $("#liveNote"); if (n && !live) n.hidden = true; }
   $("#scanCam").onchange = e => { stopLive(); handleFile(e.target, cb); };
@@ -405,8 +605,8 @@ function openAssociate(code, cb){
     <div class="list" id="assocList">${render("")}</div>
     <button class="btn block" id="assocNew">+ Crear producto nuevo con este código</button>
   </div>`);
-  const bind = () => document.querySelectorAll("#assocList [data-pid]").forEach(b => b.onclick = () => {
-    const p = P(b.dataset.pid); p.barcode = code; save(); closeModal(); toast(`Código asociado a ${p.name}`); cb(p); });
+  const bind = () => document.querySelectorAll("#assocList [data-pid]").forEach(b => b.onclick = () => run(async () => {
+    const p = await act.updateProduct(P(b.dataset.pid), { barcode:code }); closeModal(); toast(`Código asociado a ${p.name}`); cb(p); }));
   bind();
   $("#assocQ").oninput = e => { $("#assocList").innerHTML = render(e.target.value); bind(); };
   $("#assocNew").onclick = () => openProductForm(null, code, cb);
@@ -430,11 +630,12 @@ const ICONS = {
   historial:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   fiados:'<svg viewBox="0 0 24 24"><path d="M6 3h11a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1z"/><path d="M9 8h6M9 12h4"/></svg>',
   mas:'<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>',
+  equipo:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 4.6a3.2 3.2 0 0 1 0 6.3M18 14.4c1.8.9 3 3 3 5.6"/></svg>',
   reservas:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
   pan:'<svg viewBox="0 0 24 24"><path d="M4 11a8 5 0 0 1 16 0v1.5a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 12.5z"/><path d="M9 8.5l-1 3M13 8l-.5 3.5M16.5 9l.5 2.5"/></svg>'
 };
 const LABELS = { inicio:"Inicio", vender:"Vender", contar:"Contar", productos:"Productos", fiados:"Fiados", mas:"Más" };
-const IN_MAS = ["mas","recibir","historial","reservas"];
+const IN_MAS = ["mas","recibir","historial","reservas","equipo"];
 function renderTabs(){
   $("#tabs").innerHTML = Object.keys(LABELS).map(k => `<button data-view="${k}" ${ui.view===k || (k==="mas" && IN_MAS.includes(ui.view))?'aria-current="page"':''}>${ICONS[k]}<span>${LABELS[k]}</span></button>`).join("");
   document.querySelectorAll("#tabs [data-view]").forEach(b => b.onclick = () => go(b.dataset.view));
@@ -453,10 +654,12 @@ function viewInicio(){
   const week = {}; S.movs.filter(m => m.type==="venta" && m.at > Date.now()-7*D).forEach(m => week[m.pid] = (week[m.pid]||0) + m.qty);
   const top = Object.entries(week).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const sectorState = SECTORS.map(c => { const ps = avail.filter(p => p.cat===c); const done = ps.length && ps.every(p => p.countAt!=null); return `<span class="pill ${done?"ok":"none"}">${done?"✓ ":""}${esc(c)}</span>`; }).join(" ");
-  return `${header("Almacén", "Sistema de inventario · demo")}
+  const resPend = isDB() ? S.reservas.filter(r => r.dia === hoyChile() && r.estado === "pendiente") : [];
+  return `${isDB() ? header(db.ajustes.tienda_nombre || "Almacén", "Sistema de inventario") : header("Almacén", "Sistema de inventario · demo")}
   <div class="stack">
-    <div class="demo-banner"><span>Demo con datos ficticios de ejemplo.</span><button class="btn sm" id="reset">Reiniciar demo</button></div>
+    ${isDB() ? "" : `<div class="demo-banner"><span>Demo con datos ficticios de ejemplo.</span><button class="btn sm" id="reset">Reiniciar demo</button></div>`}
     <button class="panbtn" id="panbtn">${ICONS.pan}<span><b>Avisar que llegó el pan</b><small>Envía el mensaje al grupo de WhatsApp de clientes</small></span></button>
+    ${resPend.length ? `<button class="sector" data-go="reservas"><span class="name">Reservas de pan de hoy</span><span class="pill warn">${resPend.length} por entregar</span><span class="sub">Toca para ver quién reservó y marcar lo entregado</span></button>` : ""}
     <div class="kpis">
       <div class="card kpi"><div class="num">${pct}%</div><div class="lbl">del inventario contado</div><div class="bar"><i style="width:${pct}%"></i></div></div>
       <div class="card kpi"><div class="num">${clp(money)}</div><div class="lbl">vendido hoy · ${units} productos</div></div>
@@ -556,21 +759,10 @@ function viewContar(){
     <button class="btn primary block" id="finish">Terminar conteo</button>
   </div>`;
 }
-function finishCount(){
-  const now = Date.now(), diffs = [];
-  let n = 0;
-  for (const [pid, d] of Object.entries(ui.draft)){
-    const p = P(pid);
-    if (d.none === true){ p.has = false; continue; }
-    if (d.none === false) p.has = true;
-    if (d.qty === "" || d.qty == null) continue;
-    const q = Math.max(0, parseInt(d.qty, 10) || 0);
-    const expected = stockOf(p);
-    if (expected != null && expected !== q) diffs.push([p, expected, q]);
-    p.countQty = q; p.countAt = now; p.estimated = !!d.est; n++;
-    S.movs.push({ id:uid(), pid, type:"conteo", qty:q, expected, at:now });
-  }
-  save(); ui.draft = {};
+function finishCount(){ run(async () => {
+  const { n, diffs } = await act.count(ui.draft);
+  const now = Date.now();
+  ui.draft = {};
   const sector = ui.sector;
   openModal(`<div class="stack"><h2>Conteo guardado</h2>
     <p style="margin:0">${n} productos de ${esc(sector)} quedaron al día desde ahora (${new Date(now).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}). Las ventas que hagan desde este momento se descuentan solas.</p>
@@ -578,7 +770,7 @@ function finishCount(){
       <p class="small muted" style="margin:8px 0 0">Las faltas quedan registradas como merma (vencidos, robo o ventas sin registrar).</p></div>` : ""}
     <button class="btn primary block" data-close>Listo</button></div>`);
   ui.sector = null; render();
-}
+}); }
 
 function viewProductos(){
   const q = ui.prodQuery.toLowerCase();
@@ -604,9 +796,14 @@ function openProduct(p){
     </div>
     <div class="field"><label for="en">Nombre</label><input class="input" id="en" value="${esc(p.name)}"></div>
     <button class="btn primary block" id="esave">Guardar cambios</button>
-    <div><h3>Últimos movimientos</h3><div class="list">${hist.map(movRow).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
+    <div><h3>Últimos movimientos</h3><div class="list" id="phist">${hist.map(movRow).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
-  $("#esave").onclick = () => { p.price = +$("#ep").value||0; p.cost = +$("#ec").value||0; p.min = +$("#em").value||0; p.barcode = $("#eb").value.trim(); p.name = $("#en").value.trim() || p.name; save(); closeModal(); toast("Producto actualizado"); render(); };
+  $("#esave").onclick = () => run(async () => {
+    await act.updateProduct(p, { price:+$("#ep").value||0, cost:+$("#ec").value||0, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name });
+    closeModal(); toast("Producto actualizado"); render(); });
+  // En modo tienda el historial completo del producto se pide al servidor
+  if (isDB()) q(sb.from("movimientos").select("*").eq("producto_id", p.id).order("at", { ascending:false }).limit(12))
+    .then(rows => { const el = $("#phist"); if (el) el.innerHTML = rows.map(r => movRow(movFromRow(r))).join("") || `<div class="empty">Sin movimientos.</div>`; }, () => {});
 }
 function openProductForm(sector, code, cb){
   openModal(`<div class="stack">
@@ -621,23 +818,21 @@ function openProductForm(sector, code, cb){
     <p class="small muted" style="margin:0">Si escribes la cantidad, el producto queda contado desde este momento.</p>
     <button class="btn primary block" id="nsave">Guardar producto</button>
   </div>`);
-  $("#nsave").onclick = () => {
+  $("#nsave").onclick = () => run(async () => {
     const name = $("#nn").value.trim(); if (!name){ $("#nn").focus(); return; }
-    const price = +$("#np").value || 0;
-    const p = { id:"n"+uid(), name, cat:$("#ns").value, price, cost:Math.round(price*0.65), pop:0, barcode:$("#nb").value.trim(), min:3, has:true, countQty:null, countAt:null, estimated:false };
-    const q = $("#nq").value;
-    if (q !== ""){ p.countQty = Math.max(0, parseInt(q,10)||0); p.countAt = Date.now(); S.movs.push({ id:uid(), pid:p.id, type:"conteo", qty:p.countQty, expected:null, at:p.countAt }); }
-    S.products.push(p); save(); closeModal(); toast(`${name} agregado`);
+    const p = await act.newProduct({ name, cat:$("#ns").value, price:+$("#np").value || 0, barcode:$("#nb").value.trim() }, $("#nq").value);
+    closeModal(); toast(`${name} agregado`);
     if (cb) cb(p); else render();
-  };
+  });
 }
 
 function movRow(m){
   const p = P(m.pid); const nm = p ? esc(p.name) : "Producto";
-  if (m.type === "venta") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Venta · ${ago(m.at)}</div></div><span class="diff" style="color:var(--bad)">−${m.qty}</span></div>`;
-  if (m.type === "compra") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Compra${m.supplier?" a "+esc(m.supplier):""} · ${ago(m.at)}</div></div><span class="diff" style="color:var(--ok)">+${m.qty}</span></div>`;
+  const who = isDB() && userName(m.user) ? " · " + esc(userName(m.user)) : "";
+  if (m.type === "venta") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Venta · ${ago(m.at)}${who}</div></div><span class="diff" style="color:var(--bad)">−${m.qty}</span></div>`;
+  if (m.type === "compra") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Compra${m.supplier?" a "+esc(m.supplier):""} · ${ago(m.at)}${who}</div></div><span class="diff" style="color:var(--ok)">+${m.qty}</span></div>`;
   const d = m.expected != null && m.expected !== m.qty ? ` · esperaba ${m.expected}` : "";
-  return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Conteo${d} · ${ago(m.at)}</div></div><span class="pill ok">= ${m.qty}</span></div>`;
+  return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Conteo${d} · ${ago(m.at)}${who}</div></div><span class="pill ok">= ${m.qty}</span></div>`;
 }
 function viewHistorial(){
   const f = ui.histFilter;
@@ -689,8 +884,8 @@ function openCliente(c){
     <div><h3>Movimientos</h3><div class="list">${items.map(i => `<div class="item"><div class="main"><div class="name">${i.type === "fiado" ? esc(i.note || "Fiado") : "Pago"}</div><div class="sub">${ago(i.at)}</div></div>
       <span class="diff" style="color:${i.type === "fiado" ? "var(--bad)" : "var(--ok)"}">${i.type === "fiado" ? "+" : "−"}${clp(i.amount)}</span></div>`).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
-  const add = type => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
-    c.items.push({ id:uid(), type, amount:a, note:$("#fn").value.trim(), at:Date.now() }); save(); toast(type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`); render(); openCliente(c); };
+  const add = type => run(async () => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
+    await act.clientMov(c, type, a, $("#fn").value.trim()); toast(type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`); render(); openCliente(c); });
   $("#addFiado").onclick = () => add("fiado");
   $("#addAbono").onclick = () => add("abono");
 }
@@ -700,8 +895,8 @@ function openNewClient(){
     <div class="field"><label for="cn">Nombre</label><input class="input" id="cn" placeholder="Ej: Ana Ejemplo"></div>
     <div class="field"><label for="cp">Celular (para recordatorios)</label><input class="input" id="cp" inputmode="tel" placeholder="9 XXXX XXXX"></div>
     <button class="btn primary block" id="csave">Guardar cliente</button></div>`);
-  $("#csave").onclick = () => { const name = $("#cn").value.trim(); if (!name){ $("#cn").focus(); return; }
-    const c = { id:"c"+uid(), name, phone:$("#cp").value.trim(), items:[] }; S.clients.push(c); save(); render(); openCliente(c); };
+  $("#csave").onclick = () => run(async () => { const name = $("#cn").value.trim(); if (!name){ $("#cn").focus(); return; }
+    const c = await act.newClient(name, $("#cp").value.trim()); render(); openCliente(c); });
 }
 
 // ---------- Aviso del pan ----------
@@ -712,13 +907,15 @@ function openPan(){
     <a class="btn primary block" id="pango" style="text-align:center;text-decoration:none" href="${esc(waLink("", S.panMsg))}" ${WA_TARGET}>Abrir WhatsApp</a>
     ${waWebNote("panweb", "", S.panMsg)}
     <button class="btn block" id="pancopy">Copiar mensaje</button>
+    ${isDB() ? `<button class="btn block" id="panlink">Agregar el link para reservar pan</button>` : ""}
     <ol class="small muted" style="margin:0;padding-left:18px">
       <li>Se abre WhatsApp con el mensaje ya escrito.</li>
       <li>Eliges el grupo de clientes y tocas enviar.</li>
     </ol>
     <p class="small muted" style="margin:0">El mensaje queda guardado para la próxima vez.</p>
   </div>`);
-  $("#pm").oninput = e => { S.panMsg = e.target.value; save(); $("#pango").href = waLink("", S.panMsg); const w = $("#panweb"); if (w) w.href = waWeb("", S.panMsg); };
+  $("#pm").oninput = e => { act.panMsg(e.target.value); $("#pango").href = waLink("", S.panMsg); const w = $("#panweb"); if (w) w.href = waWeb("", S.panMsg); };
+  const pl = $("#panlink"); if (pl) pl.onclick = () => { const pm = $("#pm"); if (!pm.value.includes(reservaLink())){ pm.value = pm.value.trim() + "\nReserva tu pan aquí: " + reservaLink(); pm.oninput({ target:pm }); } };
   $("#pancopy").onclick = () => { const t = $("#pm").value;
     const ok = () => toast("Mensaje copiado");
     try { navigator.clipboard.writeText(t).then(ok, () => { $("#pm").select(); toast("Selecciona y copia el texto"); }); } catch(e){ $("#pm").select(); } };
@@ -733,7 +930,7 @@ function viewReservas(){
   const rs = S.reservas.slice().sort((a,b) => (a.at||0) - (b.at||0));
   const q = ui.resQty || (ui.resQty = {});
   const pend = rs.filter(r => !r.done).length;
-  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button><span class="pill warn">Próxima etapa</span></header>
+  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button><span class="pill warn">Vista previa</span></header>
   <div class="stack">
     <div><h2>Reservas de pan de hoy</h2><p class="small muted" style="margin:4px 0 0">${pend} por entregar. Toca una reserva para marcarla como entregada. La lista se borra sola cada noche a las ${RES_CUT_HOUR}:00.</p></div>
     <div class="card" style="padding-block:0"><div class="list">${rs.map(r => `<button class="item tap" data-res="${r.id}"><div class="main"><div class="name">${esc(r.name)}</div><div class="sub">${esc(r.detail)}${r.at ? " · reservó " + ago(r.at) : ""}</div></div>
@@ -745,19 +942,129 @@ function viewReservas(){
         <div class="list">${BREADS.map(b => `<div class="item"><div class="main"><div class="name">${esc(b)}</div></div>
           <div class="stepper"><button data-bdec="${esc(b)}" aria-label="Quitar ${esc(b)}">−</button><span>${q[b]||0}</span><button data-binc="${esc(b)}" aria-label="Agregar ${esc(b)}">+</button></div></div>`).join("")}</div></div>
       <button class="btn accent block" id="rsave" ${Object.values(q).some(n => n > 0) ? "" : "disabled"}>Reservar${Object.values(q).some(n => n > 0) ? " (" + resDetail(q) + ")" : ""}</button>
-      <p class="small muted" style="margin:0">En la versión final, el cliente abre un link desde el grupo de WhatsApp, reserva desde su casa y la reserva aparece al instante en el celular de la tienda.</p>
+      <p class="small muted" style="margin:0">Con la base de datos conectada, el cliente abre un link desde el grupo de WhatsApp, reserva desde su casa y la reserva aparece al instante en los celulares de la tienda.</p>
     </div>
   </div>`;
 }
 
+// ---------- Reservas reales (modo tienda) ----------
+function reservaLink(){ const u = new URL("reservar.html", location.href); u.search = ""; u.hash = ""; return u.href; }
+const RES_STATE = { pendiente:["warn","Pendiente"], entregada:["ok","Entregada"], cancelada:["none","Cancelada"] };
+function viewReservasDB(){
+  const day = ui.resDay || "hoy", dia = day === "hoy" ? hoyChile() : hoyChile(1);
+  const forDay = d => S.reservas.filter(r => r.dia === d);
+  const rs = forDay(dia).sort((a,b) => (a.estado === "cancelada") - (b.estado === "cancelada") || a.at - b.at);
+  const pend = rs.filter(r => r.estado === "pendiente");
+  const tot = {}; pend.forEach(r => Object.entries(r.items || {}).forEach(([k,n]) => tot[k] = (tot[k]||0) + n));
+  const totTxt = db.panes.map(b => b.nombre).concat(Object.keys(tot)).filter((k,i,a) => tot[k] && a.indexOf(k) === i).map(k => `${tot[k]} ${k.toLowerCase()}`).join(", ");
+  const abiertas = db.ajustes.reservas_abiertas !== false, lim = db.ajustes.reservas_hora_limite ?? 19;
+  const link = reservaLink(), msg = `🍞 Reserva tu pan en el almacén desde aquí: ${link}`;
+  const count = d => forDay(d).filter(r => r.estado === "pendiente").length;
+  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button><span class="pill ${abiertas?"ok":"none"}">${abiertas?"Recibiendo reservas":"Reservas cerradas"}</span></header>
+  <div class="stack">
+    <div><h2>Reservas de pan</h2><p class="small muted" style="margin:4px 0 0">Las reservas que hacen los clientes aparecen aquí al instante, en todos los celulares de la tienda.</p></div>
+    <div class="chips"><button class="chip" data-rday="hoy" aria-pressed="${day==="hoy"}">Hoy · ${count(hoyChile())}</button><button class="chip" data-rday="manana" aria-pressed="${day==="manana"}">Mañana · ${count(hoyChile(1))}</button></div>
+    ${totTxt ? `<div class="formula">Apartar: ${esc(totTxt)}</div>` : ""}
+    <div class="card" style="padding-block:0"><div class="list">${rs.map(r => `<button class="item tap" data-res="${r.id}"><div class="main"><div class="name">${esc(r.name)}</div><div class="sub">${esc(r.detail)} · reservó ${ago(r.at)}${r.note ? " · " + esc(r.note) : ""}</div></div>
+      <span class="pill ${RES_STATE[r.estado][0]}">${RES_STATE[r.estado][1]}</span></button>`).join("") || `<div class="empty">Todavía no hay reservas para ${day === "hoy" ? "hoy" : "mañana"}.</div>`}</div></div>
+    <div class="card stack">
+      <h3>Link para que los clientes reserven</h3>
+      <div class="code">${esc(link)}</div>
+      <div class="grid2"><a class="btn" style="text-align:center" href="${esc(waLink("", msg))}" ${WA_TARGET}>Enviar por WhatsApp</a><button class="btn" id="rcopy">Copiar link</button></div>
+      <label class="row"><input type="checkbox" id="ropen" ${abiertas?"checked":""}> Recibir reservas ahora</label>
+      <div class="field"><label for="rlim">Reservas para el mismo día hasta las</label><select class="input" id="rlim">${Array.from({ length:18 }, (_, i) => i + 6).map(h => `<option value="${h}" ${h==lim?"selected":""}>${h}:00</option>`).join("")}</select></div>
+      <p class="small muted" style="margin:0">Después de esa hora, los clientes solo pueden reservar para el día siguiente.</p>
+    </div>
+  </div>`;
+}
+function openReserva(r){
+  const first = r.name.split(" ")[0], ready = `Hola ${first}, tu pan reservado (${r.detail}) ya está listo en el almacén. ¡Te esperamos!`;
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(r.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <div class="row"><span class="pill ${RES_STATE[r.estado][0]}">${RES_STATE[r.estado][1]}</span><span class="small muted">Código ${esc(r.codigo)} · reservó ${ago(r.at)}</span></div>
+    <div class="formula">${esc(r.detail)}</div>
+    ${r.note ? `<p style="margin:0">Nota: ${esc(r.note)}</p>` : ""}
+    ${r.estado === "pendiente" ? `<button class="btn primary block" data-st="entregada">Marcar como entregada</button>` : `<button class="btn block" data-st="pendiente">Volver a pendiente</button>`}
+    ${r.phone ? `<a class="btn block" style="text-align:center" href="${esc(waLink(r.phone, ready))}" ${WA_TARGET}>Avisarle por WhatsApp que está listo</a>` : `<p class="small muted" style="margin:0">El cliente no dejó celular.</p>`}
+    ${r.estado === "pendiente" ? `<button class="btn ghost block" data-st="cancelada">Cancelar reserva</button>` : ""}
+  </div>`);
+  document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => run(async () => { await act.reserva(r, b.dataset.st); closeModal(); render(); }));
+}
+
+// ---------- Equipo y cuenta (modo tienda) ----------
+const isAdmin = () => isDB() && db.profile?.rol === "admin";
+function viewEquipo(){
+  const me = db.profile, team = Object.values(db.team).sort((a,b) => (b.rol === "admin") - (a.rol === "admin") || a.nombre.localeCompare(b.nombre));
+  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button></header>
+  <div class="stack">
+    <h2>Equipo y cuenta</h2>
+    <div class="card stack">
+      <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${me.rol === "admin" ? "Administradora" : "Vendedor/a"}</div></div><button class="btn sm" id="logout">Salir</button></div>
+      <button class="btn block" id="mypass">Cambiar mi contraseña</button>
+    </div>
+    ${isAdmin() ? `<div class="card"><div class="spread"><h3>Personas de la tienda</h3><button class="btn sm primary" id="addu">+ Agregar</button></div>
+      <div class="list">${team.map(t => `<button class="item tap" data-user="${t.id}"><div class="main"><div class="name">${esc(t.nombre)}${t.id === me.id ? " (tú)" : ""}</div><div class="sub">Usuario ${esc(t.usuario)}</div></div>
+        ${!t.activo ? `<span class="pill bad">Sin acceso</span>` : t.rol === "admin" ? `<span class="pill ok">Administradora</span>` : `<span class="pill none">Vendedor/a</span>`}</button>`).join("")}</div></div>
+    <div class="card stack"><h3>Tienda</h3>
+      <div class="field"><label for="tname">Nombre que ven los clientes</label><div class="searchbar"><input class="input" id="tname" value="${esc(db.ajustes.tienda_nombre || "Almacén")}"><button class="btn" id="tsave">Guardar</button></div></div></div>
+    <p class="small muted" style="margin:0">Vendedores/as pueden vender, recibir, contar, anotar fiados y atender reservas. Solo la administradora agrega personas y cambia permisos.</p>` : ""}
+  </div>`;
+}
+function openPersona(t){
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(t.nombre)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <p class="small muted" style="margin:0">Usuario para entrar: <b>${esc(t.usuario)}</b></p>
+    <div class="field"><label for="urol">Permisos</label><select class="input" id="urol"><option value="vendedor" ${t.rol==="vendedor"?"selected":""}>Vendedor/a</option><option value="admin" ${t.rol==="admin"?"selected":""}>Administradora</option></select></div>
+    <label class="row"><input type="checkbox" id="uact" ${t.activo?"checked":""}> Puede entrar al sistema</label>
+    <button class="btn primary block" id="usave">Guardar</button>
+    <p class="small muted" style="margin:0">Si alguien olvida su contraseña, se cambia desde el panel de Supabase (Authentication > Users).</p>
+  </div>`);
+  $("#usave").onclick = () => run(async () => {
+    await q(sb.from("perfiles").update({ rol:$("#urol").value, activo:$("#uact").checked }).eq("id", t.id));
+    await dbLoadAll(); closeModal(); render(); toast("Cambios guardados"); });
+}
+// Crea la cuenta con un cliente aparte, para no cerrar la sesión de la administradora
+async function createAccount(nombre, usuario, pass, client){
+  const { data, error } = await client.auth.signUp({ email:userEmail(usuario), password:pass, options:{ data:{ nombre, usuario:usuario.trim().toLowerCase() } } });
+  if (error) throw error;
+  if (data.user && Array.isArray(data.user.identities) && !data.user.identities.length) throw new Error("Ese usuario ya existe");
+  return data;
+}
+function openNuevaPersona(){
+  openModal(`<div class="stack">
+    <div class="spread"><h2>Agregar persona</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <div class="field"><label for="nun">Nombre</label><input class="input" id="nun" placeholder="Ej: Juan"></div>
+    <div class="field"><label for="nuu">Usuario para entrar</label><input class="input" id="nuu" autocapitalize="none" autocomplete="off" placeholder="Ej: juan"></div>
+    <div class="field"><label for="nup">Contraseña (mínimo 6 caracteres)</label><input class="input" id="nup" type="text" autocomplete="off"></div>
+    <button class="btn primary block" id="nusave">Crear cuenta</button>
+    <p class="small muted" style="margin:0">Entrégale el usuario y la contraseña. Al entrar puede cambiar su contraseña en Más > Equipo y cuenta.</p>
+  </div>`);
+  $("#nusave").onclick = () => run(async () => {
+    const nombre = $("#nun").value.trim(), usuario = $("#nuu").value.trim(), pass = $("#nup").value;
+    if (!nombre) return $("#nun").focus(); if (!usuario) return $("#nuu").focus(); if (pass.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
+    const tmp = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"almacen-alta" } });
+    const data = await createAccount(nombre, usuario, pass, tmp);
+    await q(sb.from("perfiles").update({ activo:true }).eq("id", data.user.id));
+    await dbLoadAll(); closeModal(); render(); toast(`Cuenta de ${nombre} creada`); });
+}
+function openMyPass(){
+  openModal(`<div class="stack">
+    <div class="spread"><h2>Cambiar mi contraseña</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <div class="field"><label for="mp1">Contraseña nueva</label><input class="input" id="mp1" type="password" autocomplete="new-password"></div>
+    <button class="btn primary block" id="mpsave">Guardar</button></div>`);
+  $("#mpsave").onclick = () => run(async () => { const pw = $("#mp1").value; if (pw.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
+    const { error } = await sb.auth.updateUser({ password:pw }); if (error) throw error; closeModal(); toast("Contraseña cambiada"); });
+}
+
 function viewMas(){
-  const pend = S.reservas.filter(r => !r.done).length;
+  const pend = isDB() ? S.reservas.filter(r => r.dia === hoyChile() && r.estado === "pendiente").length : S.reservas.filter(r => !r.done).length;
   const opt = (go, icon, title, sub) => `<button class="sector" data-go="${go}"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS[icon]}</span>${title}</span><span></span><span class="sub">${sub}</span></button>`;
   return `${header("Más", "Otras herramientas")}
   <div class="stack">
     ${opt("recibir","recibir","Recibir mercadería","Registrar lo que llega del proveedor")}
     ${opt("historial","historial","Historial","Todo lo que entra, sale y se cuenta")}
-    ${opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy · próxima etapa")}
+    ${opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa"))}
+    ${isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : ""}
     <button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>
   </div>`;
 }
@@ -770,17 +1077,36 @@ function bindSearch(onPick){
 }
 
 function render(){
-  purgeReservas();
+  if (!MODE) return;
+  if (!isDB()) purgeReservas();
+  if (ui.view === "equipo" && !isDB()) ui.view = "mas";
   renderTabs();
   const v = ui.view, app = $("#app");
-  app.innerHTML = ({ inicio:viewInicio, vender:viewVender, recibir:viewRecibir, contar:viewContar, productos:viewProductos, historial:viewHistorial, fiados:viewFiados, mas:viewMas, reservas:viewReservas })[v]();
+  app.innerHTML = ({ inicio:viewInicio, vender:viewVender, recibir:viewRecibir, contar:viewContar, productos:viewProductos, historial:viewHistorial, fiados:viewFiados, mas:viewMas,
+    reservas: isDB() ? viewReservasDB : viewReservas, equipo:viewEquipo })[v]();
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   const pb = $("#panbtn"); if (pb) pb.onclick = openPan;
   if (v === "fiados"){
     $("#addc").onclick = openNewClient;
     app.querySelectorAll("[data-client]").forEach(b => b.onclick = () => openCliente(S.clients.find(c => c.id === b.dataset.client)));
   }
-  if (v === "reservas"){
+  if (v === "reservas" && isDB()){
+    app.querySelectorAll("[data-res]").forEach(b => b.onclick = () => openReserva(S.reservas.find(r => r.id === b.dataset.res)));
+    app.querySelectorAll("[data-rday]").forEach(b => b.onclick = () => { ui.resDay = b.dataset.rday; render(); });
+    $("#rcopy").onclick = () => { try { navigator.clipboard.writeText(reservaLink()).then(() => toast("Link copiado"), () => toast(reservaLink())); } catch(e){ toast(reservaLink()); } };
+    $("#ropen").onchange = e => run(async () => { await act.setting("reservas_abiertas", e.target.checked); render(); toast(e.target.checked ? "Reservas abiertas" : "Reservas cerradas"); });
+    $("#rlim").onchange = e => run(async () => { await act.setting("reservas_hora_limite", +e.target.value); toast("Hora guardada"); });
+  }
+  if (v === "equipo"){
+    $("#logout").onclick = () => run(async () => { await sb.auth.signOut(); location.reload(); });
+    $("#mypass").onclick = openMyPass;
+    if (isAdmin()){
+      $("#addu").onclick = openNuevaPersona;
+      app.querySelectorAll("[data-user]").forEach(b => b.onclick = () => openPersona(db.team[b.dataset.user]));
+      $("#tsave").onclick = () => run(async () => { const n = $("#tname").value.trim(); if (!n) return; await act.setting("tienda_nombre", n); toast("Nombre guardado"); });
+    }
+  }
+  if (v === "reservas" && !isDB()){
     app.querySelectorAll("[data-res]").forEach(b => b.onclick = () => { const r = S.reservas.find(r => r.id === b.dataset.res); r.done = !r.done; save(); render(); });
     const rn = $("#rn"); rn.value = ui.resName || ""; rn.oninput = () => ui.resName = rn.value;
     const step = (b, d) => { ui.resQty[b] = Math.max(0, (ui.resQty[b]||0) + d); const y = window.scrollY; render(); window.scrollTo(0, y); };
@@ -790,7 +1116,7 @@ function render(){
       const detail = resDetail(ui.resQty); if (!detail) return;
       S.reservas.push({ id:uid(), name, detail, at:Date.now(), done:false }); ui.resQty = {}; ui.resName = ""; save(); render(); toast(`Reserva de ${name} recibida`); };
   }
-  if (v === "inicio"){
+  if (v === "inicio" && !isDB()){
     $("#reset").onclick = () => openModal(`<div class="stack"><h2>¿Reiniciar la demo?</h2><p style="margin:0">Se borran los cambios hechos y vuelven los datos de ejemplo.</p><div class="grid2"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="doreset">Reiniciar</button></div></div>`) || ($("#doreset").onclick = () => { S = buildSeed(); save(); ui.cart = []; ui.recv.items = []; ui.draft = {}; closeModal(); render(); toast("Demo reiniciada"); });
   }
   if (v === "vender"){
@@ -798,9 +1124,10 @@ function render(){
     $("#scan").onclick = () => openScanSheet(p => { addToCart(p); toast(`+1 ${p.name}`); });
     app.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { ui.cart[b.dataset.inc].qty++; render(); });
     app.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const l = ui.cart[b.dataset.dec]; if (--l.qty <= 0) ui.cart.splice(b.dataset.dec,1); render(); });
-    $("#confirm").onclick = () => { const now = Date.now(); let t = 0;
-      ui.cart.forEach(l => { const p = P(l.pid); t += l.qty*p.price; S.movs.push({ id:uid(), pid:l.pid, type:"venta", qty:l.qty, at:now, price:p.price }); });
-      ui.cart = []; save(); render(); toast(`Venta registrada: ${clp(t)}`); };
+    $("#confirm").onclick = () => run(async () => { const t = ui.cart.reduce((a,l) => a + l.qty*P(l.pid).price, 0);
+      $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
+      await act.sale(ui.cart).finally(render);
+      ui.cart = []; render(); toast(`Venta registrada: ${clp(t)}`); });
   }
   if (v === "recibir"){
     bindSearch(addToRecv);
@@ -809,9 +1136,10 @@ function render(){
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
-    $("#confirm").onclick = () => { const now = Date.now(); let n = 0;
-      ui.recv.items.forEach(l => { if (!l.qty) return; const p = P(l.pid); p.cost = l.cost; p.has = true; n += l.qty; S.movs.push({ id:uid(), pid:l.pid, type:"compra", qty:l.qty, at:now, cost:l.cost, supplier:ui.recv.supplier }); });
-      ui.recv.items = []; save(); render(); toast(`Recepción guardada: ${n} unidades`); };
+    $("#confirm").onclick = () => run(async () => { const n = ui.recv.items.reduce((a,l) => a + (l.qty||0), 0);
+      $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
+      await act.receive(ui.recv.supplier, ui.recv.items).finally(render);
+      ui.recv.items = []; render(); toast(`Recepción guardada: ${n} unidades`); });
   }
   if (v === "contar"){
     app.querySelectorAll("[data-sector]").forEach(b => b.onclick = () => { ui.sector = b.dataset.sector; ui.draft = {}; render(); window.scrollTo(0,0); });
@@ -837,7 +1165,83 @@ function render(){
     app.querySelectorAll("[data-hf]").forEach(b => b.onclick = () => { ui.histFilter = b.dataset.hf; render(); });
   }
 }
-render();
+// ---------- Inicio: demo o tienda con inicio de sesión ----------
+function gate(html){ MODE = null; $("nav.tabs").hidden = true; $("#app").innerHTML = html; window.scrollTo(0,0); }
+const gateHead = () => header("Almacén", "Sistema de inventario");
+const demoLink = `<a class="btn ghost block" style="text-align:center" href="?demo">Ver demo con datos ficticios</a>`;
+function startDemo(){ MODE = "demo"; load(); $("nav.tabs").hidden = false; render(); }
+
+async function boot(){
+  if (!DB_READY || /[?&]demo\b/.test(location.search)) return startDemo();
+  gate(`${gateHead()}<div class="empty">Conectando…</div>`);
+  try { await loadScript(SB_SRC); }
+  catch(e){ return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>Sin conexión</h2><p style="margin:0">No se pudo conectar con la base de datos de la tienda. Revisa el internet e intenta de nuevo.</p><button class="btn primary block" onclick="location.reload()">Reintentar</button></div>${demoLink}</div>`); }
+  sb = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ storageKey:"almacen-sesion" } });
+  sb.auth.onAuthStateChange(ev => { if (ev === "SIGNED_OUT" && MODE) location.reload(); });
+  const { data } = await sb.auth.getSession();
+  if (data.session) return enterDB(data.session.user);
+  showLogin();
+}
+
+async function showLogin(){
+  let first = false;
+  try { first = !(await q(sb.rpc("hay_admin"))); } catch(e){}
+  gate(`${gateHead()}<div class="stack">
+    ${first ? `<div class="card stack"><h2>Configurar la tienda</h2>
+      <p class="small muted" style="margin:0">Todavía no hay cuentas. Crea la cuenta de la administradora: con ella se agregan después las demás personas.</p>
+      <div class="field"><label for="an">Nombre</label><input class="input" id="an" placeholder="Ej: Rosa"></div>
+      <div class="field"><label for="au">Usuario para entrar</label><input class="input" id="au" autocapitalize="none" autocomplete="username" placeholder="Ej: rosa"></div>
+      <div class="field"><label for="ap">Contraseña (mínimo 6 caracteres)</label><input class="input" id="ap" type="password" autocomplete="new-password"></div>
+      <button class="btn primary block" id="asave">Crear cuenta</button></div>`
+    : `<form class="card stack" id="loginf"><h2>Entrar</h2>
+      <div class="field"><label for="lu">Usuario</label><input class="input" id="lu" autocapitalize="none" autocomplete="username" required></div>
+      <div class="field"><label for="lp">Contraseña</label><input class="input" id="lp" type="password" autocomplete="current-password" required></div>
+      <button class="btn primary block" id="lgo">Entrar</button>
+      <p class="small muted" style="margin:0">¿No tienes cuenta? Pídesela a la administradora de la tienda.</p></form>`}
+    ${demoLink}
+  </div>`);
+  if (first){
+    $("#asave").onclick = () => run(async () => {
+      const n = $("#an").value.trim(), u = $("#au").value.trim(), pw = $("#ap").value;
+      if (!n) return $("#an").focus(); if (!u) return $("#au").focus(); if (pw.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
+      const data = await createAccount(n, u, pw, sb);
+      if (!data.session) return toast("Cuenta creada, pero Supabase pide confirmar el correo. Desactiva \"Confirm email\" (ver guía) y entra.");
+      enterDB(data.session.user);
+    });
+  } else {
+    $("#loginf").onsubmit = e => { e.preventDefault(); run(async () => {
+      const btn = $("#lgo"); btn.disabled = true; btn.textContent = "Entrando…";
+      const { data, error } = await sb.auth.signInWithPassword({ email:userEmail($("#lu").value), password:$("#lp").value });
+      btn.disabled = false; btn.textContent = "Entrar";
+      if (error) throw error;
+      enterDB(data.user);
+    }); };
+  }
+}
+
+async function enterDB(user){
+  gate(`${gateHead()}<div class="empty">Cargando datos de la tienda…</div>`);
+  try {
+    const prof = await q(sb.from("perfiles").select("*").eq("id", user.id).maybeSingle());
+    if (!prof || !prof.activo){ gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>Cuenta sin acceso</h2>
+      <p style="margin:0">Tu cuenta${prof ? ` (${esc(prof.usuario)})` : ""} existe, pero la administradora todavía no le da acceso, o se lo quitó.</p>
+      <button class="btn primary block" id="retry">Revisar de nuevo</button><button class="btn block" id="out">Salir</button></div></div>`);
+      $("#retry").onclick = () => enterDB(user); $("#out").onclick = () => sb.auth.signOut().then(() => location.reload());
+      return;
+    }
+    db.profile = prof;
+    await dbLoadAll();
+  } catch(e){
+    return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>No se pudieron cargar los datos</h2><p style="margin:0">${esc(friendly(e))}</p>
+      <button class="btn primary block" onclick="location.reload()">Reintentar</button></div></div>`);
+  }
+  MODE = "db"; $("nav.tabs").hidden = false;
+  dbSubscribe(); render();
+}
+// Al volver a la app después de un rato (celular bloqueado), se trae lo que cambió
+document.addEventListener("visibilitychange", () => { if (isDB() && !document.hidden && Date.now() - db.loadedAt > 60e3) reloadSoon(); });
+
+boot();
 })();
 </script>
 

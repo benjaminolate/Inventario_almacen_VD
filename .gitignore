@@ -17,6 +17,7 @@ secrets/
 respaldos/
 backups/
 *.sql
+!supabase/schema.sql
 *.sqlite
 *.db
 *.csv

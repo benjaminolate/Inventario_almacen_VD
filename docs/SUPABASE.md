@@ -1,0 +1,82 @@
+# Conectar la tienda a Supabase (modo multiusuario)
+
+Con estos pasos, el sistema deja de guardar los datos en un solo celular y pasa a usar una base de datos en internet. Así:
+
+- Varias personas atienden al mismo tiempo, desde celulares o computadores, y todos ven el mismo stock.
+- Cada persona entra con su usuario y contraseña, y el historial muestra quién hizo cada venta, compra o conteo.
+- Los clientes reservan pan desde un link (`reservar.html`) y la reserva aparece al instante en la tienda.
+- Los datos no se pierden si se borra el navegador o se pierde un celular.
+
+Se usa el plan gratuito de Supabase. Toma unos 15 minutos.
+
+## 1. Crear el proyecto
+
+1. Entra a [supabase.com](https://supabase.com) y crea una cuenta (se puede entrar con GitHub).
+2. Presiona **New project**.
+3. Ponle un nombre (por ejemplo `almacen`), inventa una contraseña para la base de datos (guárdala, aunque la app no la usa) y elige la región **South America (São Paulo)**, que es la más cercana a Chile.
+4. Espera a que termine de crearse (un par de minutos).
+
+## 2. Crear las tablas
+
+1. En el menú de la izquierda, abre **SQL Editor**.
+2. Presiona **New query**, pega todo el contenido de [`supabase/schema.sql`](../supabase/schema.sql) y presiona **Run**.
+3. Debe decir *Success*. Ese archivo crea las tablas, los permisos, las funciones de reservas y el catálogo inicial de 54 productos. Se puede volver a ejecutar sin perder datos.
+
+## 3. Permitir entrar con usuario (sin correo)
+
+Las personas de la tienda entran con un nombre de usuario, no con su correo. Para eso Supabase no debe pedir confirmar el correo:
+
+1. Abre **Authentication** y luego **Sign In / Providers** (en algunas versiones del panel está en **Providers > Email**).
+2. Desactiva **Confirm email** y guarda.
+
+## 4. Copiar las claves a `config.js`
+
+1. Abre **Project Settings** y luego **API Keys** (o **API**, según la versión del panel). Copia la **Project URL**, que está en **Data API** o en la misma página.
+2. Copia la clave pública: **Publishable key** (empieza con `sb_publishable_`) o, en proyectos más antiguos, la **anon public key**.
+3. Pégalas en [`config.js`](../config.js):
+
+```js
+window.ALMACEN_CONFIG = {
+  supabaseUrl: "https://xxxxxxxx.supabase.co",
+  supabaseAnonKey: "sb_publishable_xxxxxxxx",
+  dominioUsuarios: "almacen.local"
+};
+```
+
+La clave pública está hecha para ir en la página: lo que cada persona puede ver o cambiar lo deciden las reglas de la base de datos. **Nunca pongas la `service_role` key ni la `secret` key** en `config.js` ni en el repositorio.
+
+4. Sube el cambio a GitHub. GitHub Pages publica la nueva versión en uno o dos minutos.
+
+## 5. Primer uso
+
+1. Abre la página de la tienda. Como todavía no hay cuentas, aparece **Configurar la tienda**: ahí se crea la cuenta de la administradora (nombre, usuario y contraseña).
+2. En **Más > Equipo y cuenta**, la administradora agrega a las demás personas con **+ Agregar** y les entrega su usuario y contraseña.
+3. Antes de empezar, conviene revisar en **Productos** los nombres y precios del catálogo inicial, y en **Más > Equipo y cuenta** el nombre de la tienda que ven los clientes.
+4. El conteo parte desde cero: se cuenta un sector a la vez, igual que en la demo.
+
+## Reservas de pan
+
+- El link para clientes está en **Más > Reservas de pan** (botones *Enviar por WhatsApp* y *Copiar link*). También se puede agregar al mensaje de **Avisar que llegó el pan**.
+- Los clientes eligen el pan, si es para hoy o mañana, y dejan su nombre y, si quieren, su celular. Reciben un código de 4 letras para decir al retirar.
+- En la tienda se ve cuánto pan apartar, se marca cada reserva como entregada y, si el cliente dejó su celular, se le avisa por WhatsApp.
+- Se puede cerrar las reservas en cualquier momento y elegir hasta qué hora se aceptan reservas para el mismo día.
+
+## Quién puede hacer qué
+
+| | Administradora | Vendedor/a |
+|---|---|---|
+| Vender, recibir mercadería, contar | Sí | Sí |
+| Editar productos y precios | Sí | Sí |
+| Anotar fiados y pagos | Sí | Sí |
+| Atender y cerrar reservas | Sí | Sí |
+| Agregar personas, quitar acceso, cambiar permisos | Sí | No |
+| Nombre de la tienda | Sí | No |
+
+Las ventas, compras y conteos quedan registrados con la hora del servidor y la persona que los hizo, y no se pueden editar ni borrar desde la app.
+
+## Cosas a saber
+
+- **Contraseña olvidada:** la administradora la cambia en el panel de Supabase, en **Authentication > Users**, eligiendo a la persona y la opción para cambiar la contraseña. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**.
+- **Plan gratuito:** Supabase pausa los proyectos gratuitos que pasan una semana sin uso. Una tienda que lo usa todos los días no se pausa; si se pausa, se reactiva desde el panel.
+- **Respaldo:** el plan gratuito no guarda copias automáticas descargables. Se pueden exportar las tablas en **Table Editor** (botón *Export to CSV*) de vez en cuando.
+- **Demo:** con la base de datos conectada, la demo con datos ficticios sigue disponible en `?demo` (por ejemplo `https://benjaminolate.github.io/Inventario_almacen_VD/?demo`) y en el botón *Ver demo con datos ficticios* de la pantalla de inicio de sesión. La demo nunca toca la base de datos.
