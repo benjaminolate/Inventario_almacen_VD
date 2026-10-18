@@ -133,7 +133,7 @@ Dentro de `index.html` el código se organiza en bloques:
 ## Estado actual
 
 - **Demo:** funciona en un solo dispositivo, con datos ficticios en el `localStorage` del navegador. Las reservas de pan son una vista previa.
-- **Tienda:** con `config.js` completo, usa la base de datos compartida, con usuarios, cambios en vivo y reservas reales.
+- **Tienda:** con `config.js` completo y abriendo la página con `?tienda`, usa la base de datos compartida, con usuarios, cambios en vivo y reservas reales. La dirección normal sigue mostrando la demo.
 
 ## Próximos pasos
 

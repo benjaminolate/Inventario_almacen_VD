@@ -49,7 +49,9 @@ La clave pública está hecha para ir en la página: lo que cada persona puede v
 
 ## 5. Primer uso
 
-1. Abre la página de la tienda. Como todavía no hay cuentas, aparece **Configurar la tienda**: ahí se crea la cuenta de la administradora (nombre, usuario y contraseña).
+La misma página sirve de demo pública y de sistema de la tienda. La dirección normal (`https://benjaminolate.github.io/Inventario_almacen_VD/`) sigue mostrando la demo, por ejemplo para quien llega desde un CV. **La tienda se abre agregando `?tienda` al final:** `https://benjaminolate.github.io/Inventario_almacen_VD/?tienda`. Cada celular o computador lo recuerda después de abrir ese link una vez, así que conviene guardarlo en la pantalla de inicio.
+
+1. Abre la página de la tienda (con `?tienda`), apenas esté publicada: el primero que crea una cuenta queda como administradora. Como todavía no hay cuentas, aparece **Configurar la tienda**: ahí se crea la cuenta de la administradora (nombre, usuario y contraseña).
 2. En **Más > Equipo y cuenta**, la administradora agrega a las demás personas con **+ Agregar** y les entrega su usuario y contraseña.
 3. Antes de empezar, conviene revisar en **Productos** los nombres y precios del catálogo inicial, y en **Más > Equipo y cuenta** el nombre de la tienda que ven los clientes.
 4. El conteo parte desde cero: se cuenta un sector a la vez, igual que en la demo.
@@ -78,5 +80,5 @@ Las ventas, compras y conteos quedan registrados con la hora del servidor y la p
 
 - **Contraseña olvidada:** la administradora la cambia en el panel de Supabase, en **Authentication > Users**, eligiendo a la persona y la opción para cambiar la contraseña. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**.
 - **Plan gratuito:** Supabase pausa los proyectos gratuitos que pasan una semana sin uso. Una tienda que lo usa todos los días no se pausa; si se pausa, se reactiva desde el panel.
-- **Respaldo:** el plan gratuito no guarda copias automáticas descargables. Se pueden exportar las tablas en **Table Editor** (botón *Export to CSV*) de vez en cuando.
-- **Demo:** con la base de datos conectada, la demo con datos ficticios sigue disponible en `?demo` (por ejemplo `https://benjaminolate.github.io/Inventario_almacen_VD/?demo`) y en el botón *Ver demo con datos ficticios* de la pantalla de inicio de sesión. La demo nunca toca la base de datos.
+- **Respaldo:** el plan gratuito no guarda copias descargables. La administradora puede descargar una copia de todo en **Más > Equipo y cuenta > Descargar respaldo** (un archivo con la fecha en el nombre); conviene hacerlo una vez por semana y guardarlo en el computador o en Google Drive. También se pueden exportar tablas sueltas en **Table Editor** (*Export to CSV*).
+- **Demo:** la dirección normal muestra la demo con datos ficticios, y en un celular de la tienda se puede abrir con `?demo` o con el botón *Ver demo con datos ficticios* de la pantalla de inicio de sesión. La demo nunca toca la base de datos.

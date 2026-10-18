@@ -1002,6 +1002,9 @@ function viewEquipo(){
       <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${me.rol === "admin" ? "Administradora" : "Vendedor/a"}</div></div><button class="btn sm" id="logout">Salir</button></div>
       <button class="btn block" id="mypass">Cambiar mi contraseña</button>
     </div>
+    ${isAdmin() ? `<div class="card stack"><h3>Respaldo</h3>
+      <p class="small muted" style="margin:0">Descarga una copia de todos los datos de la tienda (productos, ventas, compras, conteos, fiados y reservas) en un archivo. Guárdala en el computador o en Google Drive. Conviene hacerlo una vez por semana.</p>
+      <button class="btn block" id="backup">Descargar respaldo</button></div>` : ""}
     ${isAdmin() ? `<div class="card"><div class="spread"><h3>Personas de la tienda</h3><button class="btn sm primary" id="addu">+ Agregar</button></div>
       <div class="list">${team.map(t => `<button class="item tap" data-user="${t.id}"><div class="main"><div class="name">${esc(t.nombre)}${t.id === me.id ? " (tú)" : ""}</div><div class="sub">Usuario ${esc(t.usuario)}</div></div>
         ${!t.activo ? `<span class="pill bad">Sin acceso</span>` : t.rol === "admin" ? `<span class="pill ok">Administradora</span>` : `<span class="pill none">Vendedor/a</span>`}</button>`).join("")}</div></div>
@@ -1046,6 +1049,19 @@ function openNuevaPersona(){
     const data = await createAccount(nombre, usuario, pass, tmp);
     await q(sb.from("perfiles").update({ activo:true }).eq("id", data.user.id));
     await dbLoadAll(); closeModal(); render(); toast(`Cuenta de ${nombre} creada`); });
+}
+// Respaldo: todas las tablas en un archivo JSON con la fecha en el nombre
+async function downloadBackup(){
+  const btn = $("#backup"); btn.disabled = true; btn.textContent = "Preparando respaldo…";
+  try {
+    const tables = ["productos","movimientos","clientes","fiados","reservas","panes","ajustes","perfiles"], data = {};
+    for (const t of tables) data[t] = await all(() => sb.from(t).select("*").order(t === "ajustes" ? "clave" : "id"));
+    const file = { tienda: db.ajustes.tienda_nombre || "Almacén", creado: new Date().toISOString(), version: 1, tablas: data };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type:"application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = `respaldo-almacen-${hoyChile()}.json`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`Respaldo descargado: ${data.movimientos.length} movimientos`);
+  } finally { btn.disabled = false; btn.textContent = "Descargar respaldo"; }
 }
 function openMyPass(){
   openModal(`<div class="stack">
@@ -1101,6 +1117,7 @@ function render(){
     $("#logout").onclick = () => run(async () => { await sb.auth.signOut(); location.reload(); });
     $("#mypass").onclick = openMyPass;
     if (isAdmin()){
+      $("#backup").onclick = () => run(downloadBackup);
       $("#addu").onclick = openNuevaPersona;
       app.querySelectorAll("[data-user]").forEach(b => b.onclick = () => openPersona(db.team[b.dataset.user]));
       $("#tsave").onclick = () => run(async () => { const n = $("#tname").value.trim(); if (!n) return; await act.setting("tienda_nombre", n); toast("Nombre guardado"); });
@@ -1171,8 +1188,15 @@ const gateHead = () => header("Almacén", "Sistema de inventario");
 const demoLink = `<a class="btn ghost block" style="text-align:center" href="?demo">Ver demo con datos ficticios</a>`;
 function startDemo(){ MODE = "demo"; load(); $("nav.tabs").hidden = false; render(); }
 
+// La misma página sirve de demo pública (para el CV) y de sistema de la tienda.
+// La tienda se abre con ?tienda; desde ahí el navegador lo recuerda y entra siempre a la tienda.
+const STORE_FLAG = "almacen-modo-tienda";
+function storeDevice(on){ try { if (on === undefined) return localStorage.getItem(STORE_FLAG) === "1"; on ? localStorage.setItem(STORE_FLAG, "1") : localStorage.removeItem(STORE_FLAG); } catch(e){ return false; } }
+
 async function boot(){
-  if (!DB_READY || /[?&]demo\b/.test(location.search)) return startDemo();
+  const params = new URLSearchParams(location.search);
+  if (params.has("tienda")) storeDevice(true);
+  if (!DB_READY || params.has("demo") || !storeDevice()) return startDemo();
   gate(`${gateHead()}<div class="empty">Conectando…</div>`);
   try { await loadScript(SB_SRC); }
   catch(e){ return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>Sin conexión</h2><p style="margin:0">No se pudo conectar con la base de datos de la tienda. Revisa el internet e intenta de nuevo.</p><button class="btn primary block" onclick="location.reload()">Reintentar</button></div>${demoLink}</div>`); }
