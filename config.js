@@ -12,5 +12,8 @@ window.ALMACEN_CONFIG = {
   supabaseAnonKey: "sb_publishable_YiwMyApLbbao1JVoBHSWHQ_7TliOnQK",
   // Las personas entran con un nombre de usuario; por dentro se guarda como
   // usuario@<este dominio>. No se envían correos a esa dirección.
-  dominioUsuarios: "almacen.local"
+  dominioUsuarios: "almacen.local",
+  // Direcciones donde se muestra la demo (la del CV). Ahí la tienda se abre con ?tienda.
+  // En cualquier otra dirección (por ejemplo, la propia de la tienda) se entra directo a la tienda.
+  direccionesDemo: ["benjaminolate.github.io", "localhost", "127.0.0.1"]
 };

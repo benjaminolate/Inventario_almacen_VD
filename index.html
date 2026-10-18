@@ -1189,14 +1189,17 @@ const demoLink = `<a class="btn ghost block" style="text-align:center" href="?de
 function startDemo(){ MODE = "demo"; load(); $("nav.tabs").hidden = false; render(); }
 
 // La misma página sirve de demo pública (para el CV) y de sistema de la tienda.
-// La tienda se abre con ?tienda; desde ahí el navegador lo recuerda y entra siempre a la tienda.
+// En las direcciones de config.direccionesDemo se ve la demo, salvo que se abra con ?tienda
+// (desde ahí ese navegador lo recuerda). En cualquier otra dirección se entra a la tienda.
 const STORE_FLAG = "almacen-modo-tienda";
 function storeDevice(on){ try { if (on === undefined) return localStorage.getItem(STORE_FLAG) === "1"; on ? localStorage.setItem(STORE_FLAG, "1") : localStorage.removeItem(STORE_FLAG); } catch(e){ return false; } }
 
 async function boot(){
   const params = new URLSearchParams(location.search);
   if (params.has("tienda")) storeDevice(true);
-  if (!DB_READY || params.has("demo") || !storeDevice()) return startDemo();
+  // En una dirección propia de la tienda (no la del CV) se entra directo a la tienda
+  const cvHost = (CFG.direccionesDemo || []).includes(location.hostname);
+  if (!DB_READY || params.has("demo") || (cvHost && !storeDevice())) return startDemo();
   gate(`${gateHead()}<div class="empty">Conectando…</div>`);
   try { await loadScript(SB_SRC); }
   catch(e){ return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>Sin conexión</h2><p style="margin:0">No se pudo conectar con la base de datos de la tienda. Revisa el internet e intenta de nuevo.</p><button class="btn primary block" onclick="location.reload()">Reintentar</button></div>${demoLink}</div>`); }
