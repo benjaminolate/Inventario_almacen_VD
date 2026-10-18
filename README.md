@@ -1,6 +1,6 @@
 # Inventario Almacén
 
-Sistema de inventario para celular pensado para almacenes de barrio: permite vender, recibir mercadería y contar el stock por sectores escaneando códigos de barras con la cámara, todo desde el navegador y sin instalar nada.
+Sistema de inventario para celular pensado para almacenes de barrio: permite vender, recibir mercadería y contar el stock por sectores escaneando códigos de barras con la cámara, todo desde el navegador y sin instalar nada. Funciona como demo en un solo dispositivo o, conectado a Supabase, con varias personas atendiendo a la vez y reservas de pan para los clientes.
 
 **Demo en vivo:** https://benjaminolate.github.io/Inventario_almacen_VD/
 
@@ -55,8 +55,14 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - Total por cobrar entre todos los clientes.
 - **Recordatorio por WhatsApp** con el mensaje de la deuda ya redactado. Los fiados no afectan el stock.
 
-**Aviso del pan**
+**Aviso y reservas de pan**
 - Botón **"Avisar que llegó el pan"** que abre WhatsApp con el mensaje listo para enviarlo al grupo de clientes. El mensaje se puede editar o copiar y queda guardado.
+- **Reservas de pan** desde una página pública (`reservar.html`): el cliente elige el pan, si es para hoy o mañana, y recibe un código. En la tienda aparece al instante, con el total de pan a apartar, y se marca como entregada o se avisa por WhatsApp que está lista.
+
+**Multiusuario (con Supabase)**
+- Inicio de sesión con usuario y contraseña; roles de administradora y vendedor/a.
+- Todos los celulares y computadores ven el mismo stock y se actualizan en vivo.
+- El historial registra quién hizo cada movimiento, con la hora del servidor.
 
 **Otros**
 - Diseño pensado para celular, con modo oscuro automático.
@@ -68,7 +74,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 |---|---|
 | Lenguaje | JavaScript (vanilla, sin framework), HTML y CSS |
 | Arquitectura | Aplicación de una sola página (`index.html`) con vistas renderizadas desde JavaScript |
-| Datos | `localStorage` del navegador (sin servidor ni base de datos) |
+| Datos | Demo: `localStorage` del navegador. Tienda: [Supabase](https://supabase.com) (Postgres, Auth y Realtime) con reglas de acceso por fila (RLS) |
 | Códigos de barras | `BarcodeDetector` (nativo) y [ZXing](https://github.com/zxing-js/library) `@zxing/library` 0.21.3 como respaldo |
 | Cámara | `getUserMedia` (escaneo en vivo) y captura por foto |
 | Mensajería | Enlaces de WhatsApp con el mensaje ya escrito |
@@ -90,6 +96,8 @@ python3 -m http.server 8000
 
 También se puede abrir `index.html` directamente, pero el escaneo en vivo con la cámara solo funciona en HTTPS o en `localhost`.
 
+**Con base de datos (varios usuarios):** sigue la guía [docs/SUPABASE.md](docs/SUPABASE.md). Se crea un proyecto gratuito en Supabase, se ejecuta `supabase/schema.sql` y se pegan la URL y la clave pública en `config.js`. Sin esos datos, la página funciona como demo.
+
 **Requisitos:** un navegador moderno y conexión a internet (para cargar ZXing y las tipografías).
 
 ## Estructura del proyecto
@@ -97,7 +105,12 @@ También se puede abrir `index.html` directamente, pero el escaneo en vivo con l
 ```
 Inventario_almacen_VD/
 ├── index.html        # Toda la aplicación: estilos, vistas y lógica
+├── reservar.html     # Página pública para que los clientes reserven pan
+├── config.js         # URL y clave pública de Supabase (vacío = modo demo)
+├── supabase/
+│   └── schema.sql    # Tablas, permisos (RLS), funciones y catálogo inicial
 ├── docs/
+│   ├── SUPABASE.md   # Guía para conectar la base de datos
 │   └── capturas/     # Imágenes usadas en este README
 ├── README.md
 ├── LICENSE
@@ -109,27 +122,24 @@ Dentro de `index.html` el código se organiza en bloques:
 | Bloque | Qué hace |
 |---|---|
 | Datos y catálogo | Sectores, catálogo precargado y generación de los datos de ejemplo |
-| Almacenamiento | `load()` / `save()` sobre `localStorage` |
-| Cálculo de stock | `stockOf()`: último conteo + compras − ventas posteriores |
+| Almacenamiento demo | `load()` / `save()` sobre `localStorage` |
+| Base de datos | Carga desde Supabase, cambios en vivo y `act`: cada acción se guarda en modo demo o en el servidor |
+| Cálculo de stock | `stockOf()`: último conteo + compras − ventas posteriores (en la tienda lo calcula la vista `productos_stock`) |
 | Escáner | Lectura en vivo, por foto y asociación de códigos nuevos |
-| Vistas | Inicio, Vender, Recibir, Contar, Productos, Historial, Fiados y Más |
+| Vistas | Inicio, Vender, Recibir, Contar, Productos, Historial, Fiados, Reservas, Equipo y Más |
+| Inicio de sesión | Pantalla de entrada, creación de la primera cuenta y modo demo |
 | WhatsApp | Enlaces para recordatorios de fiados y aviso del pan |
 
 ## Estado actual
 
-**Demo funcional.** Todo lo descrito en Funcionalidades funciona en un solo dispositivo, con los datos guardados en el `localStorage` del navegador.
-
-Todavía **no tiene**:
-- Base de datos compartida: los datos no se sincronizan entre celulares y se pierden si se borran los datos del navegador.
-- Usuarios ni inicio de sesión.
-
-Incluye además una **vista previa de reservas de pan** (marcada como "próxima etapa"): muestra la lista de reservas del día, permite marcarlas como entregadas y simular una reserva.
+- **Demo:** funciona en un solo dispositivo, con datos ficticios en el `localStorage` del navegador. Las reservas de pan son una vista previa.
+- **Tienda:** con `config.js` completo y abriendo la página con `?tienda`, usa la base de datos compartida, con usuarios, cambios en vivo y reservas reales. La dirección normal sigue mostrando la demo.
 
 ## Próximos pasos
 
-- Base de datos compartida para usar el sistema desde varios celulares a la vez.
-- Usuarios e inicio de sesión para el personal del almacén.
-- Reservas de pan reales: el cliente reserva desde un link y la reserva llega al celular de la tienda.
+- Instalar la app en el celular y que siga funcionando si se corta internet.
+- Reportes de ventas y ganancia por día, semana y mes.
+- Anular una venta mal registrada (hoy los movimientos no se editan).
 
 ## Autor
 
