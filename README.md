@@ -37,8 +37,9 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 ## Funcionalidades
 
 **Inventario**
-- **Ventas:** búsqueda por nombre o escaneo, carrito con cantidades y total, medio de pago (efectivo, débito o transferencia) y cálculo del vuelto. Botones rápidos para lo que más se vende (por ejemplo, el pan).
-- **Venta a granel:** pan y verduras con precio por kilo; se venden por peso (lo que marca la balanza) o por monto ("$1.000 de pan").
+- **Ventas:** búsqueda por nombre o escaneo, carrito con cantidades y total, medio de pago (efectivo, débito o transferencia) y cálculo del vuelto. Botones rápidos para lo que más se vende (por ejemplo, el pan, que se vende por unidad).
+- **Tipos de pan:** cada pan con su precio por unidad, botón rápido en Vender y opción de reservarlo.
+- **Venta a granel:** verduras con precio por kilo; se venden por peso (lo que marca la balanza) o por monto ("$1.000 de pan").
 - **Ofertas y packs:** por ejemplo "3 galletas por $1.500"; el descuento se aplica solo en el carrito al juntar las unidades, y avisa cuando falta poco para completar el pack.
 - **Recepción de mercadería:** registro de lo que llega del proveedor, con cantidad, costo unitario, fecha de vencimiento opcional y total de la factura.
 - **Lista de compras:** se arma sola con los productos bajo el stock mínimo, separada por proveedor, con cantidades sugeridas, pedido por WhatsApp y un botón para recibir ese pedido.
@@ -46,7 +47,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Vencimientos:** aviso de lo que vence esta semana o ya venció, para venderlo antes o rebajarlo con una oferta.
 - **Cierre de caja:** compara lo registrado desde el último cierre con lo contado en caja, separado en efectivo (con el sencillo inicial), débito y transferencia, y guarda el historial de cierres.
 - **Conteo por sectores:** se cuenta un sector a la vez; una cantidad se puede marcar como aproximada o un producto como "No lo tenemos". Al terminar muestra las diferencias entre lo que esperaba el sistema y lo contado.
-- **Productos:** catálogo precargado con 67 productos típicos de almacén en 11 sectores (incluidos pan y verduras a granel), con filtro, búsqueda, edición (nombre, precio, costo, stock mínimo, código de barras), últimos movimientos y alta de productos nuevos.
+- **Productos:** catálogo precargado con 67 productos típicos de almacén en 11 sectores (incluidos pan por unidad y verduras a granel), con filtro, búsqueda, edición (nombre, precio, costo, stock mínimo, código de barras), últimos movimientos y alta de productos nuevos.
 - **Historial** de ventas, compras y conteos, con filtro por tipo.
 - **Panel de inicio:** porcentaje del inventario contado, ventas del día, avance del conteo por sector, productos bajo el stock mínimo y lo más vendido en los últimos 7 días.
 
@@ -71,8 +72,9 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - El historial registra quién hizo cada movimiento, con la hora del servidor.
 
 **Otros**
-- Diseño pensado para celular, con tema claro, oscuro o automático.
-- **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Ajustes** si la tienda no los usa.
+- Diseño pensado para celular. **Más** separa Logística, Ayudas y Configuración, y cada pantalla tiene botón **Regresar** (también funciona el botón atrás del celular).
+- **Apariencia** por aparato: tema claro, oscuro o automático, 5 fuentes y colores personalizados.
+- **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Extensiones** si la tienda no los usa.
 - Datos ficticios de ejemplo y botón **"Reiniciar demo"**.
 
 ## Tecnologías

@@ -15,6 +15,7 @@
   --bg:#f4f6f1; --surface:#ffffff; --surface-2:#eaeee5; --fg:#1d2a22; --muted:#5d6b62; --line:#d7ddd2;
   --brand:#1f5c3d; --brand-fg:#ffffff; --accent:#e0a526; --accent-soft:#fbefd2;
   --ok:#2c7a4b; --ok-soft:#dcefe2; --warn:#a86a00; --warn-soft:#fbecd0; --bad:#b33a2b; --bad-soft:#f8dfdb;
+  --accent-fg:#1d1606;
   --font-display:"Bricolage Grotesque", "Figtree", system-ui, sans-serif;
   --font-body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
   --r:12px;
@@ -50,19 +51,26 @@ h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
 .demo-banner{display:flex;gap:8px;align-items:center;justify-content:space-between;background:var(--accent-soft);border-radius:var(--r);padding:10px 12px;font-size:13px}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;font-weight:600}
 .btn.primary{background:var(--brand);color:var(--brand-fg);border-color:var(--brand)}
-.btn.accent{background:var(--accent);color:#1d1606;border-color:var(--accent)}
+.btn.accent{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .btn.ghost{background:transparent}
 .btn.sm{padding:6px 10px;font-size:13px}
 .btn.block{width:100%}
-.panbtn{display:flex;gap:14px;align-items:center;width:100%;text-align:left;border:0;border-radius:var(--r);padding:14px 16px;background:var(--accent);color:#1d1606}
+.panbtn{display:flex;gap:14px;align-items:center;width:100%;text-align:left;border:0;border-radius:var(--r);padding:14px 16px;background:var(--accent);color:var(--accent-fg)}
 .panbtn svg{width:34px;height:34px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .panbtn b{display:block;font-size:16px}
 .panbtn small{display:block;font-size:13px;opacity:.8}
 .quick{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
-.qbtn{display:flex;gap:10px;align-items:center;text-align:left;border:0;border-radius:var(--r);padding:12px;background:var(--accent);color:#1d1606;min-height:56px}
+.qbtn{display:flex;gap:10px;align-items:center;text-align:left;border:0;border-radius:var(--r);padding:12px;background:var(--accent);color:var(--accent-fg);min-height:56px}
 .qbtn svg{width:26px;height:26px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .qbtn b{display:block;font-size:15px}
 .qbtn small{display:block;font-size:12px;opacity:.8}
+.swatches{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.swatch{width:40px;height:40px;border-radius:50%;border:2px solid var(--line);padding:0}
+.swatch[aria-pressed="true"]{outline:3px solid var(--fg);outline-offset:2px}
+.swatch.custom{position:relative;overflow:hidden;background:conic-gradient(#e44,#ec4,#4c6,#4ae,#a4e,#e44)}
+.swatch.custom input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0}
+.fontopt{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 14px;font-size:17px}
+.fontopt[aria-pressed="true"]{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
 .mi svg{width:22px;height:22px;stroke:var(--brand);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 textarea.input{resize:vertical}
 a.btn{color:inherit;text-decoration:none;display:inline-block}
@@ -152,11 +160,11 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 const SECTORS = ["Pan","Verduras","Bebidas","Jugos","Lácteos","Abarrotes","Legumbres","Galletas","Conservas","Snacks","Aseo"];
 
-// Catálogo precargado típico de almacén: [nombre, sector, precio venta, costo, popularidad 0-3, unidad, botón rápido]
+// Catálogo precargado típico de almacén: [nombre, sector, precio venta, costo, popularidad 0-3, unidad, botón rápido, se reserva]
 // unidad "kg" = a granel: el precio es por kilo y se vende por peso o por monto
 const CATALOG = [
- ["Marraqueta","Pan",2490,1700,3,"kg",1],["Hallulla","Pan",2490,1700,3,"kg",1],["Pan amasado","Pan",2990,2000,2,"kg",1],
- ["Dobladitas","Pan",2990,2000,1,"kg"],["Pan integral","Pan",2990,2000,1,"kg"],
+ ["Marraqueta","Pan",250,160,3,"un",1,1],["Hallulla","Pan",250,160,3,"un",1,1],["Pan amasado","Pan",400,260,2,"un",1,1],
+ ["Dobladitas","Pan",250,160,1,"un",0,1],["Pan integral","Pan",300,200,1,"un",0,1],
  ["Tomate","Verduras",1490,900,2,"kg"],["Papa","Verduras",990,550,2,"kg"],["Cebolla","Verduras",990,550,2,"kg"],["Zanahoria","Verduras",990,550,1,"kg"],
  ["Palta","Verduras",4990,3500,1,"kg"],["Limón","Verduras",1990,1200,1,"kg"],["Plátano","Verduras",1290,800,1,"kg"],["Lechuga","Verduras",990,600,1],
  ["Coca-Cola 1,5 L","Bebidas",1990,1300,3],["Coca-Cola 3 L","Bebidas",2990,2050,2],["Coca-Cola Zero 1,5 L","Bebidas",1990,1300,1],
@@ -191,7 +199,7 @@ function atDay(daysAgo, hour, min){ const d = new Date(Date.now() - daysAgo*D); 
 function buildSeed(){
   const r = rng(42);
   const products = CATALOG.map((c, i) => ({ id:"p"+i, name:c[0], cat:c[1], price:c[2], cost:c[3], pop:c[4],
-    barcode:"", min: c[5] === "kg" ? (c[4] >= 2 ? 2 : 1) : c[4] >= 2 ? 6 : 3, unit:c[5] || "un", atajo:!!c[6],
+    barcode:"", min: c[1] === "Pan" ? 10 : c[5] === "kg" ? (c[4] >= 2 ? 2 : 1) : c[4] >= 2 ? 6 : 3, unit:c[5] || "un", atajo:!!c[6], reserva:!!c[7],
     has:true, countQty:null, countAt:null, estimated:false }));
   ["7800000000011","7800000000028","7800000000035"].forEach((b, i) => { products.find(p => p.name === ["Coca-Cola 1,5 L","Coca-Cola 3 L","Coca-Cola Zero 1,5 L"][i]).barcode = b; });
   const byName = n => products.find(p => p.name === n);
@@ -208,7 +216,7 @@ function buildSeed(){
       while (k-- > 0){
         const t = atDay(d, 9 + Math.floor(r()*12), Math.floor(r()*60));
         if (t > now - 5*60e3) continue;
-        movs.push({ id:uid(), pid:p.id, type:"venta", qty: p.unit === "kg" ? Math.round((0.25 + r()*1.25) * 4) / 4 : r() < 0.2 ? 2 : 1, at:t, price:p.price });
+        movs.push({ id:uid(), pid:p.id, type:"venta", qty: p.unit === "kg" ? Math.round((0.25 + r()*1.25) * 4) / 4 : p.cat === "Pan" ? 2 + Math.floor(r()*9) : r() < 0.2 ? 2 : 1, at:t, price:p.price });
       }
     }
   }
@@ -258,7 +266,7 @@ function seedV3(st){
   st.movs.sort((a,b) => a.at - b.at);
   st.ofertas = [ { id:"o1", pid:byName("Galletas rellenas chocolate").id, qty:3, price:1500, active:true },
                  { id:"o2", pid:byName("Coca-Cola 1,5 L").id, qty:2, price:3500, active:true } ];
-  st.cierres = []; st.ext = {}; st.v3 = st.v4 = true;
+  st.cierres = []; st.ext = {}; st.v3 = st.v4 = st.v5 = true;
   return st;
 }
 
@@ -304,8 +312,12 @@ function load(){ try { const raw = localStorage.getItem(KEY); if (raw) { S = JSO
   if (!S.v3){ seedV3(S); save(); }
   // Pan y verduras a granel (agregados después): se suman a una demo ya guardada
   if (!S.v4){ CATALOG.forEach((c, i) => { if (!S.products.some(p => p.name === c[0])) S.products.push({ id:"g"+i, name:c[0], cat:c[1], price:c[2], cost:c[3], pop:c[4],
-      barcode:"", min:c[5] === "kg" ? 2 : 3, unit:c[5] || "un", atajo:!!c[6], has:true, countQty:null, countAt:null, estimated:false, provId:"v3" }); });
-    S.v4 = true; save(); } }
+      barcode:"", min:c[1] === "Pan" ? 10 : c[5] === "kg" ? 2 : 3, unit:c[5] || "un", atajo:!!c[6], reserva:!!c[7], has:true, countQty:null, countAt:null, estimated:false, provId:"v3" }); });
+    S.v4 = true; save(); }
+  // El pan pasó de kilo a unidad
+  if (!S.v5){ S.products.filter(p => p.cat === "Pan").forEach(p => { const c = CATALOG.find(c => c[0] === p.name); if (!c || p.unit !== "kg") return;
+      Object.assign(p, { unit:"un", price:c[2], cost:c[3], min:10, atajo:!!c[6], reserva:!!c[7], countQty:null, countAt:null }); });
+    S.movs = S.movs.filter(m => !(P(m.pid)?.cat === "Pan" && m.qty % 1)); S.v5 = true; save(); } }
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} }
 
 const ui = { view:"inicio", cart:[], medio:"efectivo", shop:{}, recv:{ supplier:"Distribuidora Ejemplo", provId:"v1", items:[] }, sector:null, draft:{}, prodFilter:"Todos", prodQuery:"", histFilter:"todos" };
@@ -510,19 +522,19 @@ const act = {
   },
   async updateProduct(p, f){
     if (!isDB()){ Object.assign(p, f); save(); return p; }
-    const map = { name:"nombre", price:"precio", cost:"costo", min:"minimo", barcode:"codigo", provId:"proveedor_id", unit:"unidad", atajo:"atajo" }, cols = { actualizado:new Date().toISOString() };
+    const map = { name:"nombre", price:"precio", cost:"costo", min:"minimo", barcode:"codigo", provId:"proveedor_id", unit:"unidad", atajo:"atajo", has:"tiene" }, cols = { actualizado:new Date().toISOString() };
     for (const k in f) if (map[k]) cols[map[k]] = k === "barcode" || k === "provId" ? (f[k] || null) : f[k];
     await q(sb.from("productos").update(cols).eq("id", p.id));
     await fetchProducts([p.id]); return P(p.id);
   },
   async newProduct(f, qty){
     if (!isDB()){
-      const p = { id:"n"+uid(), name:f.name, cat:f.cat, price:f.price, cost:Math.round(f.price*0.65), pop:0, barcode:f.barcode, min:f.unit === "kg" ? 2 : 3, unit:f.unit || "un", atajo:!!f.atajo, has:true, countQty:null, countAt:null, estimated:false };
+      const p = { id:"n"+uid(), name:f.name, cat:f.cat, price:f.price, cost:Math.round(f.price*0.65), pop:0, barcode:f.barcode, min:f.cat === "Pan" ? 10 : f.unit === "kg" ? 2 : 3, unit:f.unit || "un", atajo:!!f.atajo, reserva:!!f.reserva, has:true, countQty:null, countAt:null, estimated:false };
       if (qty !== ""){ p.countQty = Math.max(0, r3(parseFloat(qty)||0)); p.countAt = Date.now(); S.movs.push({ id:uid(), pid:p.id, type:"conteo", qty:p.countQty, expected:null, at:p.countAt }); }
       S.products.push(p); save(); return p;
     }
     const row = await q(sb.from("productos").insert({ nombre:f.name, sector:f.cat, precio:f.price, costo:Math.round(f.price*0.65), codigo:f.barcode || null,
-      unidad:f.unit || "un", atajo:!!f.atajo, minimo:f.unit === "kg" ? 2 : 3 }).select().single());
+      unidad:f.unit || "un", atajo:!!f.atajo, minimo:f.cat === "Pan" ? 10 : f.unit === "kg" ? 2 : 3 }).select().single());
     if (qty !== "") await q(sb.rpc("registrar_conteo", { items:[{ producto_id:row.id, cantidad:Math.max(0, r3(parseFloat(qty)||0)) }] }));
     await Promise.all([syncMovs(), fetchProducts([row.id])]);
     return P(row.id);
@@ -590,6 +602,14 @@ const act = {
     const cur = { ...(isDB() ? db.ajustes.extensiones : S.ext) || {}, [k]:on };
     if (!isDB()){ S.ext = cur; save(); return; }
     await act.setting("extensiones", cur);
+  },
+  // Pan que los clientes pueden reservar: en la tienda es la lista "panes" (la usa reservar.html)
+  async panReserva(p, on, oldName){
+    if (!isDB()){ p.reserva = on; save(); return; }
+    const cur = db.panes.find(b => b.nombre === (oldName || p.name));
+    if (cur) await q(sb.from("panes").update({ nombre:p.name, activo:on }).eq("id", cur.id));
+    else if (on) await q(sb.from("panes").insert({ nombre:p.name, orden:Math.max(0, ...db.panes.map(b => b.orden)) + 1 }));
+    db.panes = await q(sb.from("panes").select("*").order("orden"));
   },
   async reserva(r, estado){
     if (!isDB()){ r.done = estado === "entregada"; save(); return; }
@@ -737,13 +757,41 @@ const EXTS = [
   ["ofertas","Ofertas y packs","Descuentos automáticos al vender, por ejemplo 3 galletas por $1.500"],
   ["caja","Cierre de caja","Medio de pago en cada venta y cuadre de efectivo, débito y transferencia"]];
 const ext = k => (((isDB() ? db.ajustes.extensiones : S && S.ext) || {})[k]) !== false;
-const VIEW_EXT = { fiados:"fiados", reservas:"pan", compras:"proveedores", proveedores:"proveedores", vencimientos:"vencimientos", ofertas:"ofertas", caja:"caja" };
+const VIEW_EXT = { fiados:"fiados", reservas:"pan", tiposdepan:"pan", compras:"proveedores", proveedores:"proveedores", vencimientos:"vencimientos", ofertas:"ofertas", caja:"caja" };
 // Tema: automático (según el celular), claro u oscuro; se recuerda en cada aparato
 const THEME_KEY = "almacen-tema";
 function getTheme(){ try { return localStorage.getItem(THEME_KEY) || "auto"; } catch(e){ return "auto"; } }
 function applyTheme(t){ const r = document.documentElement; if (t === "claro") r.dataset.theme = "light"; else if (t === "oscuro") r.dataset.theme = "dark"; else delete r.dataset.theme; }
-function setTheme(t){ try { localStorage.setItem(THEME_KEY, t); } catch(e){} applyTheme(t); }
-applyTheme(getTheme());
+function setTheme(t){ try { localStorage.setItem(THEME_KEY, t); } catch(e){} applyTheme(t); applyLook(); }
+// Fuente y colores personalizados (también por aparato)
+const LOOK_KEY = "almacen-apariencia";
+const FONTS = [["figtree","Original","Figtree"],["nunito","Redondeada","Nunito"],["inter","Clásica","Inter"],["atkinson","Fácil de leer","Atkinson Hyperlegible"],["merriweather","Con serifa","Merriweather"]];
+const BRANDS = [["#1f5c3d","Verde"],["#1f4e8c","Azul"],["#5b3a8c","Morado"],["#8c2f39","Burdeo"],["#36414c","Gris"]];
+const ACCENTS = [["#e0a526","Amarillo"],["#e07a26","Naranjo"],["#4fb3d9","Celeste"],["#e58fb0","Rosado"],["#9bc53d","Verde limón"]];
+function getLook(){ try { return JSON.parse(localStorage.getItem(LOOK_KEY)) || {}; } catch(e){ return {}; } }
+function setLook(patch){ const l = Object.assign(getLook(), patch); Object.keys(l).forEach(k => l[k] == null && delete l[k]); try { localStorage.setItem(LOOK_KEY, JSON.stringify(l)); } catch(e){} applyLook(); }
+const hexRgb = h => [1,3,5].map(i => parseInt(h.slice(i, i+2), 16));
+const rgbHex = c => "#" + c.map(v => Math.round(v).toString(16).padStart(2, "0")).join("");
+const mix = (a, b, t) => rgbHex(hexRgb(a).map((v, i) => v + (hexRgb(b)[i] - v) * t));
+const lum = h => { const [r,g,b] = hexRgb(h).map(v => { v /= 255; return v <= 0.03928 ? v/12.92 : ((v+0.055)/1.055) ** 2.4; }); return 0.2126*r + 0.7152*g + 0.0722*b; };
+const isDark = () => { const t = getTheme(); return t === "oscuro" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches); };
+function applyLook(){
+  const l = getLook(), st = document.documentElement.style, dark = isDark();
+  const font = FONTS.find(f => f[0] === l.font);
+  if (font && font[0] !== "figtree"){
+    let link = document.getElementById("fontlink");
+    if (!link){ link = document.createElement("link"); link.id = "fontlink"; link.rel = "stylesheet"; document.head.appendChild(link); }
+    link.href = `https://fonts.googleapis.com/css2?family=${font[2].replace(/ /g, "+")}:wght@400;700&display=swap`;
+    st.setProperty("--font-body", `"${font[2]}", system-ui, sans-serif`); st.setProperty("--font-display", `"${font[2]}", system-ui, sans-serif`);
+  } else { st.removeProperty("--font-body"); st.removeProperty("--font-display"); }
+  if (l.brand){ const b = dark ? mix(l.brand, "#ffffff", 0.4) : l.brand; st.setProperty("--brand", b); st.setProperty("--brand-fg", lum(b) > 0.35 ? "#10140f" : "#ffffff"); }
+  else { st.removeProperty("--brand"); st.removeProperty("--brand-fg"); }
+  if (l.accent){ st.setProperty("--accent", l.accent); st.setProperty("--accent-fg", lum(l.accent) > 0.3 ? "#1d1606" : "#ffffff");
+    st.setProperty("--accent-soft", dark ? mix(l.accent, "#121814", 0.75) : mix(l.accent, "#ffffff", 0.8)); }
+  else { ["--accent","--accent-fg","--accent-soft"].forEach(k => st.removeProperty(k)); }
+}
+applyTheme(getTheme()); applyLook();
+try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyLook); } catch(e){}
 
 // Ofertas: se aplica primero el pack más grande. Ej: 3 x $1.500 con 7 galletas = 2 packs + 1 suelta
 const activeOffers = pid => ext("ofertas") && !isKg(P(pid)) ? (S.ofertas || []).filter(o => o.active && o.pid === pid && o.qty > 1).sort((a,b) => b.qty - a.qty) : [];
@@ -793,17 +841,21 @@ const ICONS = {
   vencimientos:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M12 13v3M12 18.5v.01"/></svg>',
   ofertas:'<svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.4"/></svg>',
   caja:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
+  apariencia:'<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.4-.7-2.3 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7.3" r="1.2"/><circle cx="14.5" cy="7.3" r="1.2"/></svg>',
   ajustes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>'
 };
 const LABELS = { inicio:"Inicio", vender:"Vender", contar:"Contar", productos:"Productos", fiados:"Fiados", mas:"Más" };
-const IN_MAS = ["mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","ajustes"];
+const IN_MAS = ["mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
 function renderTabs(){
   const keys = Object.keys(LABELS).filter(k => k !== "fiados" || ext("fiados"));
   $("#tabs").style.gridTemplateColumns = `repeat(${keys.length},1fr)`;
   $("#tabs").innerHTML = keys.map(k => `<button data-view="${k}" ${ui.view===k || (k==="mas" && IN_MAS.includes(ui.view))?'aria-current="page"':''}>${ICONS[k]}<span>${LABELS[k]}</span></button>`).join("");
   document.querySelectorAll("#tabs [data-view]").forEach(b => b.onclick = () => go(b.dataset.view));
 }
-function go(v){ ui.view = v; if (v !== "contar") ui.sector = null; render(); window.scrollTo(0,0); }
+// Cada pantalla queda en el historial del navegador: el botón "atrás" del celular regresa a la anterior
+function go(v){ if (v === ui.view && !ui.sector) return; ui.view = v; if (v !== "contar") ui.sector = null; try { history.pushState({ v }, ""); } catch(e){} render(); window.scrollTo(0,0); }
+window.addEventListener("popstate", e => { if (!MODE) return; if ($("#modalroot").innerHTML){ closeModal(); try { history.pushState({ v:ui.view }, ""); } catch(e){} return; }
+  if (ui.view === "contar" && ui.sector){ ui.sector = null; } else { ui.view = e.state?.v || "inicio"; ui.sector = null; } render(); window.scrollTo(0,0); });
 function header(title, sub){ return `<header class="top"><h1 class="brandname">${esc(title)}<small>${esc(sub)}</small></h1></header>`; }
 
 function viewInicio(){
@@ -922,10 +974,13 @@ function openGranel(p, idx){
 
 function viewRecibir(){
   const total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos");
-  return `${header("Recibir mercadería", "Lo que llega del proveedor")}
+  return `${backMas}${header("Recibir mercadería", "Lo que llega del proveedor")}
   <div class="stack">
-    <div class="field"><label for="sup">Proveedor</label><input class="input" id="sup" value="${esc(ui.recv.supplier)}" list="provlist" autocomplete="off">
-      <datalist id="provlist">${(S.proveedores || []).map(v => `<option value="${esc(v.name)}">`).join("")}</datalist></div>
+    <div class="field"><label for="sup">Proveedor o distribuidora</label>
+      ${(S.proveedores || []).length ? `<div class="chips" style="flex-wrap:wrap">${S.proveedores.slice().sort((a,b) => a.name.localeCompare(b.name)).map(v => `<button class="chip" data-rprov="${v.id}" aria-pressed="${ui.recv.provId === v.id}">${esc(v.name)}</button>`).join("")}</div>` : ""}
+      <input class="input" id="sup" value="${esc(ui.recv.supplier)}" list="provlist" autocomplete="off" placeholder="Toca una de arriba o escribe una nueva">
+      <datalist id="provlist">${(S.proveedores || []).map(v => `<option value="${esc(v.name)}">`).join("")}</datalist>
+      <span class="small muted">Una distribuidora nueva queda guardada al guardar la recepción.</span></div>
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto recibido" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
     <div class="card">
@@ -958,7 +1013,7 @@ function viewContar(){
     </div>`;
   }
   const ps = S.products.filter(p => p.cat === ui.sector);
-  return `<header class="top"><button class="btn sm" id="back">← Sectores</button><span class="small muted">${ps.filter(p=>p.has).length} productos</span></header>
+  return `<header class="top"><button class="btn sm" id="back">← Regresar a sectores</button><span class="small muted">${ps.filter(p=>p.has).length} productos</span></header>
   <div class="stack">
     <div><h2>Contando: ${esc(ui.sector)}</h2><p class="small muted" style="margin:4px 0 0">Escribe lo que hay en la estantería. Cada escaneo suma 1. Lo que no tengan, márcalo y desaparece de las listas.</p></div>
     <div class="row"><button class="btn accent" id="scan">Escanear (+1)</button><button class="btn" id="addp">+ Agregar producto</button></div>
@@ -1059,7 +1114,7 @@ function movRow(m){
 function viewHistorial(){
   const f = ui.histFilter;
   const list = S.movs.filter(m => f==="todos" || m.type===f).sort((a,b)=>b.at-a.at).slice(0, 80);
-  return `${header("Historial", "Todo lo que entra, sale y se cuenta")}
+  return `${backMas}${header("Historial", "Todo lo que entra, sale y se cuenta")}
   <div class="stack">
     <div class="chips">${[["todos","Todos"],["venta","Ventas"],["compra","Compras"],["conteo","Conteos"]].map(([k,l]) => `<button class="chip" data-hf="${k}" aria-pressed="${f===k}">${l}</button>`).join("")}</div>
     <div class="card" style="padding-block:0"><div class="list">${list.map(movRow).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
@@ -1145,15 +1200,17 @@ function openPan(){
 }
 
 // ---------- Reservas (vista previa) ----------
-const BREADS = ["Marraquetas","Hallullas","Pan amasado","Dobladitas","Pan integral"];
+const panes = () => S.products.filter(p => p.cat === "Pan" && p.has);
+const panReservable = p => isDB() ? db.panes.some(b => b.activo && b.nombre === p.name) : !!p.reserva;
+const BREADS_DEMO = () => panes().filter(panReservable).map(p => p.name);
 function resCutoff(){ const d = new Date(); d.setHours(RES_CUT_HOUR,0,0,0); if (d.getTime() > Date.now()) d.setDate(d.getDate()-1); return d.getTime(); }
 function purgeReservas(){ const cut = resCutoff(); const n = S.reservas.length; S.reservas = S.reservas.filter(r => r.at && r.at >= cut); if (S.reservas.length !== n) save(); }
-const resDetail = q => BREADS.filter(b => q[b] > 0).map(b => `${q[b]} ${b.toLowerCase()}`).join(", ");
+const resDetail = q => BREADS_DEMO().filter(b => q[b] > 0).map(b => `${q[b]} ${b.toLowerCase()}`).join(", ");
 function viewReservas(){
   const rs = S.reservas.slice().sort((a,b) => (a.at||0) - (b.at||0));
   const q = ui.resQty || (ui.resQty = {});
   const pend = rs.filter(r => !r.done).length;
-  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button><span class="pill warn">Vista previa</span></header>
+  return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button><span class="pill warn">Vista previa</span></header>
   <div class="stack">
     <div><h2>Reservas de pan de hoy</h2><p class="small muted" style="margin:4px 0 0">${pend} por entregar. Toca una reserva para marcarla como entregada. La lista se borra sola cada noche a las ${RES_CUT_HOUR}:00.</p></div>
     <div class="card" style="padding-block:0"><div class="list">${rs.map(r => `<button class="item tap" data-res="${r.id}"><div class="main"><div class="name">${esc(r.name)}</div><div class="sub">${esc(r.detail)}${r.at ? " · reservó " + ago(r.at) : ""}</div></div>
@@ -1162,7 +1219,7 @@ function viewReservas(){
       <h3>Así lo vería el cliente en su celular</h3>
       <div class="field"><label for="rn">Tu nombre</label><input class="input" id="rn" placeholder="Ej: Ana Torres"></div>
       <div class="field"><label>¿Qué pan quieres?</label>
-        <div class="list">${BREADS.map(b => `<div class="item"><div class="main"><div class="name">${esc(b)}</div></div>
+        <div class="list">${BREADS_DEMO().map(b => `<div class="item"><div class="main"><div class="name">${esc(b)}</div></div>
           <div class="stepper"><button data-bdec="${esc(b)}" aria-label="Quitar ${esc(b)}">−</button><span>${q[b]||0}</span><button data-binc="${esc(b)}" aria-label="Agregar ${esc(b)}">+</button></div></div>`).join("")}</div></div>
       <button class="btn accent block" id="rsave" ${Object.values(q).some(n => n > 0) ? "" : "disabled"}>Reservar${Object.values(q).some(n => n > 0) ? " (" + resDetail(q) + ")" : ""}</button>
       <p class="small muted" style="margin:0">Con la base de datos conectada, el cliente abre un link desde el grupo de WhatsApp, reserva desde su casa y la reserva aparece al instante en los celulares de la tienda.</p>
@@ -1183,7 +1240,7 @@ function viewReservasDB(){
   const abiertas = db.ajustes.reservas_abiertas !== false, lim = db.ajustes.reservas_hora_limite ?? 19;
   const link = reservaLink(), msg = `🍞 Reserva tu pan en el almacén desde aquí: ${link}`;
   const count = d => forDay(d).filter(r => r.estado === "pendiente").length;
-  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button><span class="pill ${abiertas?"ok":"none"}">${abiertas?"Recibiendo reservas":"Reservas cerradas"}</span></header>
+  return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button><span class="pill ${abiertas?"ok":"none"}">${abiertas?"Recibiendo reservas":"Reservas cerradas"}</span></header>
   <div class="stack">
     <div><h2>Reservas de pan</h2><p class="small muted" style="margin:4px 0 0">Las reservas que hacen los clientes aparecen aquí al instante, en todos los celulares de la tienda.</p></div>
     <div class="chips"><button class="chip" data-rday="hoy" aria-pressed="${day==="hoy"}">Hoy · ${count(hoyChile())}</button><button class="chip" data-rday="manana" aria-pressed="${day==="manana"}">Mañana · ${count(hoyChile(1))}</button></div>
@@ -1218,7 +1275,7 @@ function openReserva(r){
 const isAdmin = () => isDB() && db.profile?.rol === "admin";
 function viewEquipo(){
   const me = db.profile, team = Object.values(db.team).sort((a,b) => (b.rol === "admin") - (a.rol === "admin") || a.nombre.localeCompare(b.nombre));
-  return `<header class="top"><button class="btn sm" data-go="mas">← Más</button></header>
+  return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button></header>
   <div class="stack">
     <h2>Equipo y cuenta</h2>
     <div class="card stack">
@@ -1296,7 +1353,7 @@ function openMyPass(){
 }
 
 // ---------- Lista de compras y proveedores ----------
-const backMas = `<header class="top"><button class="btn sm" data-go="mas">← Más</button></header>`;
+const backMas = `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button></header>`;
 // Agrupa lo que está bajo el mínimo por proveedor. La cantidad sugerida deja el stock en el doble del mínimo.
 function shopGroups(){
   const groups = {};
@@ -1440,41 +1497,102 @@ async function loadCaja(){
     ui.caja = null; render(); toast(dif === 0 ? "Caja cerrada: cuadró" : `Caja cerrada: ${dif < 0 ? "faltó" : "sobró"} ${clp(Math.abs(dif))}`); });
 }
 
-// ---------- Ajustes: extensiones y apariencia ----------
-function viewAjustes(){
-  const canExt = !isDB() || isAdmin(), t = getTheme();
+// ---------- Extensiones ----------
+function viewExtensiones(){
+  const canExt = !isDB() || isAdmin();
   return `${backMas}
   <div class="stack">
-    <h2>Ajustes</h2>
-    <div class="card stack"><h3>Apariencia</h3>
-      <div class="chips">${[["auto","Automático"],["claro","Claro"],["oscuro","Oscuro"]].map(([k,n]) => `<button class="chip" data-theme-set="${k}" aria-pressed="${t===k}">${n}</button>`).join("")}</div>
-      <p class="small muted" style="margin:0">Automático sigue el modo del celular o computador. Se guarda en cada aparato.</p></div>
-    <div class="card"><h3>Extensiones</h3>
-      <p class="small muted" style="margin:4px 0 0">Enciende solo lo que la tienda usa; lo apagado desaparece de los menús y no se pierde nada de lo anotado.${isDB() ? " Aplica a todos los aparatos de la tienda." : ""}</p>
-      <div class="list">${EXTS.map(([k,n,d]) => `<label class="item" style="cursor:${canExt ? "pointer" : "default"}"><div class="main"><div class="name">${n}</div><div class="sub">${d}</div></div>
-        <input type="checkbox" data-ext="${k}" ${ext(k) ? "checked" : ""} ${canExt ? "" : "disabled"} style="width:22px;height:22px;accent-color:var(--brand)"></label>`).join("")}</div>
-      ${canExt ? "" : `<p class="small muted" style="margin:8px 0 0">Solo la administradora puede cambiar las extensiones.</p>`}
-    </div>
+    <div><h2>Extensiones</h2><p class="small muted" style="margin:4px 0 0">Enciende solo lo que la tienda usa; lo apagado desaparece de los menús y no se pierde nada de lo anotado.${isDB() ? " Aplica a todos los aparatos de la tienda." : ""}</p></div>
+    <div class="card" style="padding-block:4px"><div class="list">${EXTS.map(([k,n,d]) => `<label class="item" style="cursor:${canExt ? "pointer" : "default"}"><div class="main"><div class="name">${n}</div><div class="sub">${d}</div></div>
+      <input type="checkbox" data-ext="${k}" ${ext(k) ? "checked" : ""} ${canExt ? "" : "disabled"} style="width:22px;height:22px;accent-color:var(--brand)"></label>`).join("")}</div></div>
+    ${canExt ? "" : `<p class="small muted" style="margin:0">Solo la administradora puede cambiar las extensiones.</p>`}
   </div>`;
+}
+
+// ---------- Apariencia: tema, fuente y colores ----------
+function viewApariencia(){
+  const t = getTheme(), l = getLook(), font = l.font || "figtree";
+  // Para que cada opción se vea con su propia fuente
+  if (!document.getElementById("fontpreview")){ const k = document.createElement("link"); k.id = "fontpreview"; k.rel = "stylesheet";
+    k.href = "https://fonts.googleapis.com/css2?" + FONTS.slice(1).map(f => "family=" + f[2].replace(/ /g, "+") + ":wght@400").join("&") + "&display=swap"; document.head.appendChild(k); }
+  const sw = (kind, list, cur, def) => `<div class="swatches">${list.map(([c,n]) => `<button class="swatch" style="background:${c}" data-${kind}="${c}" aria-pressed="${(cur || def) === c}" aria-label="${n}" title="${n}"></button>`).join("")}
+    <label class="swatch custom" title="Elegir otro color" aria-pressed="${!!cur && !list.some(([c]) => c === cur)}"><input type="color" data-${kind}-custom value="${cur || def}" aria-label="Elegir otro color"></label></div>`;
+  return `${backMas}
+  <div class="stack">
+    <div><h2>Apariencia</h2><p class="small muted" style="margin:4px 0 0">Se guarda en cada celular o computador, así cada persona lo deja a su gusto.</p></div>
+    <div class="card stack"><h3>Tema</h3>
+      <div class="chips">${[["auto","Automático"],["claro","Claro"],["oscuro","Oscuro"]].map(([k,n]) => `<button class="chip" data-theme-set="${k}" aria-pressed="${t===k}">${n}</button>`).join("")}</div>
+      <p class="small muted" style="margin:0">Automático sigue el modo del celular o computador.</p></div>
+    <div class="card stack"><h3>Fuente</h3>
+      ${FONTS.map(([k,n,fam]) => `<button class="fontopt" data-font="${k}" aria-pressed="${font===k}" style="font-family:'${fam}',system-ui,sans-serif"><span>${n}</span><span class="small muted">${fam}</span></button>`).join("")}</div>
+    <div class="card stack"><h3>Color principal</h3><p class="small muted" style="margin:0">Botones principales, íconos y la sección elegida abajo.</p>${sw("brand", BRANDS, l.brand, "#1f5c3d")}</div>
+    <div class="card stack"><h3>Color destacado</h3><p class="small muted" style="margin:0">Botones de pan, escanear y avisos.</p>${sw("accent", ACCENTS, l.accent, "#e0a526")}</div>
+    <div class="row"><button class="btn primary">Así se ve un botón</button><button class="btn accent">Y uno destacado</button></div>
+    <button class="btn ghost block" id="lookreset">Volver a la apariencia original</button>
+  </div>`;
+}
+
+// ---------- Tipos de pan: se venden por unidad, con su precio ----------
+function viewTiposPan(){
+  const ps = panes().sort((a,b) => (b.atajo - a.atajo) || a.name.localeCompare(b.name));
+  return `${backMas}
+  <div class="stack">
+    <div class="spread"><h2>Tipos de pan</h2><button class="btn primary sm" id="addpan">+ Agregar</button></div>
+    <p class="small muted" style="margin:0">El pan se vende por unidad. Los que tienen botón rápido aparecen arriba en Vender${isDB() ? ", y los que se reservan aparecen en el link de reservas de los clientes" : ""}.</p>
+    <div class="card" style="padding-block:0"><div class="list">${ps.map(p => `<button class="item tap" data-pan="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div>
+      <div class="sub">${[p.atajo ? "Botón rápido" : "", panReservable(p) ? "Se reserva" : ""].filter(Boolean).join(" · ") || "Solo en la búsqueda"}</div></div><span class="qty">${clp(p.price)}</span></button>`).join("") || `<div class="empty">Aún no hay tipos de pan.</div>`}</div></div>
+  </div>`;
+}
+function openPanTipo(p){
+  const canRes = !isDB() || isAdmin();
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${p ? esc(p.name) : "Nuevo tipo de pan"}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <div class="grid2">
+      <div class="field"><label for="tpn">Nombre</label><input class="input" id="tpn" value="${esc(p?.name || "")}" placeholder="Ej: Coliza"></div>
+      <div class="field"><label for="tpp">Precio por unidad</label><input class="input" id="tpp" type="number" min="0" inputmode="numeric" value="${p?.price ?? ""}" placeholder="Ej: 250"></div>
+    </div>
+    <label class="row"><input type="checkbox" id="tpa" ${!p || p.atajo ? "checked" : ""}> Botón rápido en Vender</label>
+    ${ext("pan") ? `<label class="row"><input type="checkbox" id="tpr" ${!p || panReservable(p) ? "checked" : ""} ${canRes ? "" : "disabled"}> Los clientes lo pueden reservar</label>
+      ${canRes ? "" : `<p class="small muted" style="margin:0">Solo la administradora cambia el pan que se reserva.</p>`}` : ""}
+    <button class="btn primary block" id="tpsave">Guardar</button>
+    ${p ? `<button class="btn ghost block" id="tpdel">Ya no lo vendemos</button>` : ""}
+  </div>`);
+  $("#tpsave").onclick = () => run(async () => {
+    const name = $("#tpn").value.trim(), price = Math.round(+$("#tpp").value || 0);
+    if (!name) return $("#tpn").focus(); if (price <= 0) return $("#tpp").focus();
+    const oldName = p?.name, f = { name, price, atajo:$("#tpa").checked, unit:"un" };
+    const prod = p ? await act.updateProduct(p, f) : await act.newProduct({ ...f, cat:"Pan", barcode:"" }, "");
+    const r = $("#tpr"); if (r && !r.disabled && (r.checked !== panReservable(prod) || (oldName && oldName !== name))) await act.panReserva(prod, r.checked, oldName);
+    closeModal(); render(); toast(`${name} guardado`); });
+  const del = $("#tpdel"); if (del) del.onclick = () => run(async () => {
+    await act.updateProduct(p, { has:false, atajo:false }); if (panReservable(p) && (!isDB() || isAdmin())) await act.panReserva(p, false);
+    closeModal(); render(); toast(`${p.name} quitado`); });
 }
 
 function viewMas(){
   const pend = isDB() ? S.reservas.filter(r => r.dia === hoyChile() && r.estado === "pendiente").length : S.reservas.filter(r => !r.done).length;
   const opt = (go, icon, title, sub) => `<button class="sector" data-go="${go}"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS[icon]}</span>${title}</span><span></span><span class="sub">${sub}</span></button>`;
   const low = lowStock().length, venc = vencList().filter(m => diasPara(m.vence) <= 7).length, nOfe = (S.ofertas || []).filter(o => o.active).length;
+  const sec = (title, items) => items.join("") ? `<h3 style="margin-top:8px">${title}</h3>${items.join("")}` : "";
+  const nPan = panes().length;
   return `${header("Más", "Otras herramientas")}
   <div class="stack">
-    ${opt("recibir","recibir","Recibir mercadería","Registrar lo que llega del proveedor")}
-    ${ext("proveedores") ? opt("compras","compras","Lista de compras", low ? `${low} productos bajo el mínimo` : "Nada bajo el mínimo") : ""}
-    ${ext("proveedores") ? opt("proveedores","proveedores","Proveedores", `${(S.proveedores || []).length} proveedores · contacto y productos de cada uno`) : ""}
-    ${ext("vencimientos") ? opt("vencimientos","vencimientos","Vencimientos", venc ? `${venc} vencen esta semana o ya vencieron` : "Nada por vencer esta semana") : ""}
-    ${ext("ofertas") ? opt("ofertas","ofertas","Ofertas y packs", `${nOfe} ${nOfe === 1 ? "oferta activa" : "ofertas activas"}`) : ""}
-    ${ext("caja") ? opt("caja","caja","Cierre de caja","Cuadrar efectivo, débito y transferencia") : ""}
-    ${opt("historial","historial","Historial","Todo lo que entra, sale y se cuenta")}
-    ${ext("pan") ? opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa")) : ""}
-    ${isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : ""}
-    ${opt("ajustes","ajustes","Ajustes","Extensiones y tema claro u oscuro")}
-    ${ext("pan") ? `<button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>` : ""}
+    ${sec("Logística", [
+      opt("recibir","recibir","Recibir mercadería","Registrar lo que llega del proveedor"),
+      ext("proveedores") ? opt("compras","compras","Lista de compras", low ? `${low} ${low === 1 ? "producto" : "productos"} bajo el mínimo` : "Nada bajo el mínimo") : "",
+      ext("proveedores") ? opt("proveedores","proveedores","Proveedores", `${(S.proveedores || []).length} ${(S.proveedores || []).length === 1 ? "guardado" : "guardados"} · contacto y productos de cada uno`) : "",
+      ext("vencimientos") ? opt("vencimientos","vencimientos","Vencimientos", venc ? `${venc} vencen esta semana o ya vencieron` : "Nada por vencer esta semana") : "",
+      ext("ofertas") ? opt("ofertas","ofertas","Ofertas y packs", `${nOfe} ${nOfe === 1 ? "oferta activa" : "ofertas activas"}`) : "",
+      ext("caja") ? opt("caja","caja","Cierre de caja","Cuadrar efectivo, débito y transferencia") : "",
+      opt("historial","historial","Historial","Todo lo que entra, sale y se cuenta")])}
+    ${sec("Ayudas", ext("pan") ? [
+      `<button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>`,
+      opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa")),
+      opt("tiposdepan","pan","Tipos de pan", `${nPan} ${nPan === 1 ? "tipo" : "tipos"} · precio por unidad y botones rápidos`)] : [])}
+    ${sec("Configuración", [
+      isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : "",
+      opt("extensiones","ajustes","Extensiones","Encender o apagar partes de la app"),
+      opt("apariencia","apariencia","Apariencia","Tema claro u oscuro, fuente y colores")])}
   </div>`;
 }
 
@@ -1489,12 +1607,13 @@ function render(){
   if (!MODE) return;
   if (!isDB()) purgeReservas();
   if (ui.view === "equipo" && !isDB()) ui.view = "mas";
+  if (ui.view === "ajustes") ui.view = "extensiones";
   if (VIEW_EXT[ui.view] && !ext(VIEW_EXT[ui.view])) ui.view = ui.view === "fiados" ? "inicio" : "mas";
   renderTabs();
   const v = ui.view, app = $("#app");
   app.innerHTML = ({ inicio:viewInicio, vender:viewVender, recibir:viewRecibir, contar:viewContar, productos:viewProductos, historial:viewHistorial, fiados:viewFiados, mas:viewMas,
     reservas: isDB() ? viewReservasDB : viewReservas, equipo:viewEquipo, compras:viewCompras, proveedores:viewProveedores, vencimientos:viewVencimientos,
-    ofertas:viewOfertas, caja:viewCaja, ajustes:viewAjustes })[v]();
+    ofertas:viewOfertas, caja:viewCaja, extensiones:viewExtensiones, apariencia:viewApariencia, tiposdepan:viewTiposPan })[v]();
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   const pb = $("#panbtn"); if (pb) pb.onclick = openPan;
   if (v === "compras"){
@@ -1519,8 +1638,20 @@ function render(){
     app.querySelectorAll("[data-ofe]").forEach(b => b.onclick = () => openOferta(S.ofertas.find(o => o.id === b.dataset.ofe)));
   }
   if (v === "caja") loadCaja().catch(e => { const b = $("#cajabox"); if (b) b.innerHTML = `<div class="card empty">${esc(friendly(e))}</div>`; });
-  if (v === "ajustes"){
-    app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); render(); });
+  if (v === "apariencia"){
+    app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); softRender(); });
+    app.querySelectorAll("[data-font]").forEach(b => b.onclick = () => { setLook({ font:b.dataset.font }); softRender(); });
+    app.querySelectorAll("[data-brand]").forEach(b => b.onclick = () => { setLook({ brand:b.dataset.brand }); softRender(); });
+    app.querySelectorAll("[data-accent]").forEach(b => b.onclick = () => { setLook({ accent:b.dataset.accent }); softRender(); });
+    const bc = app.querySelector("[data-brand-custom]"); bc.oninput = () => setLook({ brand:bc.value }); bc.onchange = softRender;
+    const ac = app.querySelector("[data-accent-custom]"); ac.oninput = () => setLook({ accent:ac.value }); ac.onchange = softRender;
+    $("#lookreset").onclick = () => { try { localStorage.removeItem(LOOK_KEY); } catch(e){} setTheme("auto"); softRender(); toast("Apariencia original"); };
+  }
+  if (v === "tiposdepan"){
+    $("#addpan").onclick = () => openPanTipo(null);
+    app.querySelectorAll("[data-pan]").forEach(b => b.onclick = () => openPanTipo(P(b.dataset.pan)));
+  }
+  if (v === "extensiones"){
     app.querySelectorAll("[data-ext]").forEach(i => i.onchange = () => run(async () => { await act.setExt(i.dataset.ext, i.checked); render(); toast(i.checked ? "Extensión encendida" : "Extensión apagada"); }));
   }
   if (v === "fiados"){
@@ -1576,6 +1707,8 @@ function render(){
     bindSearch(addToRecv);
     $("#sup").oninput = e => { ui.recv.supplier = e.target.value; const n = e.target.value.trim().toLowerCase();
       ui.recv.provId = (S.proveedores || []).find(v => v.name.toLowerCase() === n)?.id || null; };
+    app.querySelectorAll("[data-rprov]").forEach(b => b.onclick = () => { const p = provById(b.dataset.rprov);
+      ui.recv.provId = p.id; ui.recv.supplier = p.name; softRender(); });
     app.querySelectorAll("[data-rv]").forEach(i => i.onchange = () => { ui.recv.items[i.dataset.rv].vence = i.value; });
     $("#scan").onclick = () => openScanSheet(p => addToRecv(p));
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
@@ -1692,7 +1825,7 @@ async function enterDB(user){
     return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>No se pudieron cargar los datos</h2><p style="margin:0">${esc(friendly(e))}</p>
       <button class="btn primary block" onclick="location.reload()">Reintentar</button></div></div>`);
   }
-  MODE = "db"; $("nav.tabs").hidden = false;
+  MODE = "db"; $("nav.tabs").hidden = false; ui.recv = { supplier:"", provId:null, items:[] };
   dbSubscribe(); render();
 }
 // Al volver a la app después de un rato (celular bloqueado), se trae lo que cambió
