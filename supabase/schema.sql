@@ -50,13 +50,14 @@ declare primera boolean;
 begin
   perform pg_advisory_xact_lock(4242);
   primera := not exists (select 1 from perfiles where rol = 'admin');
-  insert into perfiles (id, usuario, nombre, rol, activo)
+  insert into perfiles (id, usuario, nombre, rol, activo, maestra)
   values (
     new.id,
     coalesce(nullif(new.raw_user_meta_data->>'usuario',''), split_part(new.email,'@',1)),
     coalesce(nullif(new.raw_user_meta_data->>'nombre',''), split_part(new.email,'@',1)),
     case when primera then 'admin' else 'vendedor' end,
-    primera
+    primera,
+    primera and not exists (select 1 from perfiles where maestra)
   );
   return new;
 end $$;
@@ -78,6 +79,73 @@ end $$;
 drop trigger if exists al_cambiar_perfil on public.perfiles;
 create constraint trigger al_cambiar_perfil after update or delete on public.perfiles
   deferrable initially deferred for each row execute function public.cuidar_admins();
+
+-- Cuenta maestra: la primera cuenta (o, en tiendas que ya existían, la
+-- administradora más antigua). Siempre es administradora activa y solo
+-- su dueño la puede cambiar.
+alter table public.perfiles add column if not exists maestra boolean not null default false;
+create unique index if not exists perfiles_una_maestra on public.perfiles ((true)) where maestra;
+
+create or replace function public.cuidar_maestra() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  -- auth.uid() es null en el SQL Editor: ahí sí se puede cambiar todo
+  if auth.uid() is null then return coalesce(new, old); end if;
+  if tg_op = 'DELETE' then
+    if old.maestra then raise exception 'La cuenta maestra no se puede borrar'; end if;
+    return old;
+  end if;
+  if new.maestra is distinct from old.maestra then raise exception 'La cuenta maestra no se puede traspasar desde la app'; end if;
+  if old.maestra then
+    if auth.uid() <> old.id then raise exception 'La cuenta maestra solo la puede cambiar su dueño'; end if;
+    if new.rol <> 'admin' or not new.activo then raise exception 'La cuenta maestra siempre es administradora y con acceso'; end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists al_cambiar_maestra on public.perfiles;
+create trigger al_cambiar_maestra before update or delete on public.perfiles
+  for each row execute function public.cuidar_maestra();
+
+do $$ begin
+  if not exists (select 1 from perfiles where maestra) then
+    update perfiles set maestra = true
+     where id = (select id from perfiles where rol = 'admin' and activo order by creado limit 1);
+  end if;
+end $$;
+
+-- La administradora cambia el usuario o la contraseña de otra persona
+-- (o los suyos). La cuenta maestra solo la cambia su dueño.
+create or replace function public.cambiar_acceso(persona uuid, usuario_nuevo text default null, clave_nueva text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare p perfiles; correo text; u text;
+begin
+  if not es_admin() then raise exception 'Solo la administradora puede cambiar usuarios y contraseñas'; end if;
+  select * into p from perfiles where id = persona;
+  if not found then raise exception 'Esa persona no existe'; end if;
+  if p.maestra and persona <> auth.uid() then raise exception 'La cuenta maestra solo la puede cambiar su dueño'; end if;
+
+  if nullif(trim(coalesce(clave_nueva, '')), '') is not null then
+    if char_length(clave_nueva) < 6 then raise exception 'La contraseña debe tener al menos 6 caracteres'; end if;
+    update auth.users set encrypted_password = crypt(clave_nueva, gen_salt('bf')), updated_at = now() where id = persona;
+  end if;
+
+  u := regexp_replace(lower(trim(coalesce(usuario_nuevo, ''))), '\s+', '.', 'g');
+  if u <> '' and u <> p.usuario then
+    if u !~ '^[a-z0-9._-]{2,40}$' then raise exception 'El usuario solo puede tener letras sin tilde, números, punto o guion'; end if;
+    select split_part(email, '@', 2) into correo from auth.users where id = persona;
+    correo := u || '@' || coalesce(nullif(correo, ''), 'almacen.local');
+    if exists (select 1 from auth.users where lower(email) = correo and id <> persona) then raise exception 'Ese usuario ya existe'; end if;
+    update auth.users set email = correo, updated_at = now(),
+      raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('usuario', u)
+     where id = persona;
+    if to_regclass('auth.identities') is not null then
+      execute 'update auth.identities set identity_data = identity_data || jsonb_build_object(''email'', $1::text), updated_at = now() where user_id = $2 and provider = ''email'''
+        using correo, persona;
+    end if;
+    update perfiles set usuario = u where id = persona;
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- Proveedores
@@ -554,6 +622,8 @@ revoke execute on function public.resumen_caja() from public, anon;
 revoke execute on function public.registrar_cierre(integer, jsonb, text) from public, anon;
 revoke execute on function public.restaurar_respaldo(jsonb) from public, anon;
 grant execute on function public.restaurar_respaldo(jsonb) to authenticated;
+revoke execute on function public.cambiar_acceso(uuid, text, text) from public, anon;
+grant execute on function public.cambiar_acceso(uuid, text, text) to authenticated;
 grant execute on function public.registrar_venta(jsonb, text), public.registrar_compra(text, jsonb, uuid),
   public.registrar_conteo(jsonb), public.revisar_vencimiento(uuid, boolean), public.resumen_caja(),
   public.registrar_cierre(integer, jsonb, text) to authenticated;
