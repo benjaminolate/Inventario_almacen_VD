@@ -206,6 +206,7 @@ alter table public.movimientos add column if not exists vence_revisado boolean n
 create index if not exists movimientos_producto_at on public.movimientos (producto_id, at);
 create index if not exists movimientos_vence on public.movimientos (vence) where vence is not null;
 create index if not exists movimientos_at on public.movimientos (at desc);
+create index if not exists movimientos_grupo on public.movimientos (grupo);
 
 -- Stock calculado: último conteo + compras − ventas posteriores al conteo
 create view public.productos_stock with (security_invoker = true) as
@@ -221,17 +222,26 @@ from public.productos p;
 -- Venta: [{"producto_id": "...", "cantidad": 3, "precio": 590, "descuento": 270}, ...]
 -- medio: efectivo, debito o transferencia
 drop function if exists public.registrar_venta(jsonb);
-create or replace function public.registrar_venta(items jsonb, medio text default 'efectivo') returns uuid
+-- grupo_id y hora los manda el celular cuando la venta se guardó sin internet:
+-- si la misma venta llega dos veces se guarda una sola, y queda con la hora real
+-- en que se hizo (como mucho 3 días atrás, nunca en el futuro).
+drop function if exists public.registrar_venta(jsonb, text);
+create or replace function public.registrar_venta(items jsonb, medio text default 'efectivo', grupo_id uuid default null, hora timestamptz default null) returns uuid
 language plpgsql security definer set search_path = public as $$
-declare g uuid := gen_random_uuid();
+declare g uuid := coalesce(registrar_venta.grupo_id, gen_random_uuid());
+        t timestamptz := least(now(), greatest(coalesce(registrar_venta.hora, now()), now() - interval '3 days'));
 begin
   if not es_miembro() then raise exception 'Sin permiso'; end if;
   if jsonb_typeof(items) <> 'array' or jsonb_array_length(items) = 0 then raise exception 'Venta vacía'; end if;
   if registrar_venta.medio not in ('efectivo','debito','transferencia') then raise exception 'Medio de pago no válido'; end if;
-  insert into movimientos (producto_id, tipo, cantidad, precio, descuento, medio, grupo, usuario_id)
+  if registrar_venta.grupo_id is not null then
+    perform pg_advisory_xact_lock(hashtext(g::text));
+    if exists (select 1 from movimientos where grupo = g) then return g; end if;
+  end if;
+  insert into movimientos (producto_id, tipo, cantidad, precio, descuento, medio, grupo, usuario_id, at)
   select (i->>'producto_id')::uuid, 'venta', round((i->>'cantidad')::numeric, 3),
          coalesce((i->>'precio')::int, p.precio), greatest(0, coalesce((i->>'descuento')::int, 0)),
-         registrar_venta.medio, g, auth.uid()
+         registrar_venta.medio, g, auth.uid(), t
   from jsonb_array_elements(items) i join productos p on p.id = (i->>'producto_id')::uuid
   where (i->>'cantidad')::numeric > 0;
   return g;
@@ -614,7 +624,7 @@ end $$;
 -- Las funciones internas no se exponen a visitantes sin sesión
 revoke execute on function public.nuevo_perfil() from public, anon, authenticated;
 revoke execute on function public.cuidar_admins() from public, anon, authenticated;
-revoke execute on function public.registrar_venta(jsonb, text) from public, anon;
+revoke execute on function public.registrar_venta(jsonb, text, uuid, timestamptz) from public, anon;
 revoke execute on function public.registrar_compra(text, jsonb, uuid) from public, anon;
 revoke execute on function public.registrar_conteo(jsonb) from public, anon;
 revoke execute on function public.revisar_vencimiento(uuid, boolean) from public, anon;
@@ -624,7 +634,7 @@ revoke execute on function public.restaurar_respaldo(jsonb) from public, anon;
 grant execute on function public.restaurar_respaldo(jsonb) to authenticated;
 revoke execute on function public.cambiar_acceso(uuid, text, text) from public, anon;
 grant execute on function public.cambiar_acceso(uuid, text, text) to authenticated;
-grant execute on function public.registrar_venta(jsonb, text), public.registrar_compra(text, jsonb, uuid),
+grant execute on function public.registrar_venta(jsonb, text, uuid, timestamptz), public.registrar_compra(text, jsonb, uuid),
   public.registrar_conteo(jsonb), public.revisar_vencimiento(uuid, boolean), public.resumen_caja(),
   public.registrar_cierre(integer, jsonb, text) to authenticated;
 grant execute on function public.hay_admin(), public.info_reservas(), public.info_tienda(), public.hoy_chile(),
