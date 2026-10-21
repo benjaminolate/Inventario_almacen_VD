@@ -20,7 +20,9 @@ Se usa el plan gratuito de Supabase. Toma unos 15 minutos.
 
 1. En el menú de la izquierda, abre **SQL Editor**.
 2. Presiona **New query**, pega todo el contenido de [`supabase/schema.sql`](../supabase/schema.sql) y presiona **Run**.
-3. Debe decir *Success*. Ese archivo crea las tablas, los permisos, las funciones de reservas y el catálogo inicial de 54 productos. Se puede volver a ejecutar sin perder datos.
+3. Debe decir *Success*. Ese archivo crea las tablas, los permisos, las funciones de reservas y el catálogo inicial de productos. Se puede volver a ejecutar sin perder datos.
+
+**Al actualizar la app:** cuando una versión nueva trae funciones que guardan datos nuevos (por ejemplo proveedores, ofertas, cierres de caja o venta a granel), hay que volver a ejecutar el `schema.sql` completo de esa versión en el **SQL Editor**, idealmente antes de publicar la página nueva. Agrega solo lo que falta: no borra ventas, productos ni cuentas.
 
 ## 3. Permitir entrar con usuario (sin correo)
 
@@ -73,6 +75,8 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 | Atender y cerrar reservas | Sí | Sí |
 | Agregar personas, quitar acceso, cambiar permisos | Sí | No |
 | Nombre de la tienda | Sí | No |
+| Proveedores, ofertas, cierre de caja | Sí | Sí |
+| Encender o apagar extensiones | Sí | No |
 
 Las ventas, compras y conteos quedan registrados con la hora del servidor y la persona que los hizo, y no se pueden editar ni borrar desde la app.
 

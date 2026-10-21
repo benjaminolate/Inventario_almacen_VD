@@ -80,6 +80,17 @@ create constraint trigger al_cambiar_perfil after update or delete on public.per
   deferrable initially deferred for each row execute function public.cuidar_admins();
 
 -- ---------------------------------------------------------------------
+-- Proveedores
+-- ---------------------------------------------------------------------
+create table if not exists public.proveedores (
+  id       uuid primary key default gen_random_uuid(),
+  nombre   text not null check (char_length(nombre) between 1 and 80),
+  telefono text not null default '',
+  nota     text not null default '',     -- ej: "pasa los martes"
+  creado   timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
 -- Catálogo
 -- ---------------------------------------------------------------------
 create table if not exists public.productos (
@@ -111,58 +122,89 @@ create table if not exists public.movimientos (
   usuario_id  uuid references auth.users(id) default auth.uid(),
   at          timestamptz not null default now()
 );
+-- Columnas agregadas después de la primera versión (se suman sin perder datos)
+drop view if exists public.productos_stock;   -- se vuelve a crear más abajo
+-- Venta a granel: las cantidades aceptan decimales (1,250 kg de pan)
+alter table public.movimientos alter column cantidad    type numeric(12,3);
+alter table public.movimientos alter column esperado    type numeric(12,3);
+alter table public.productos   alter column conteo_cant type numeric(12,3);
+alter table public.productos   add column if not exists unidad text not null default 'un' check (unidad in ('un','kg'));  -- kg = a granel, precio por kilo
+alter table public.productos   add column if not exists atajo boolean not null default false;  -- botón rápido en Vender
+alter table public.productos   add column if not exists proveedor_id uuid references public.proveedores(id) on delete set null;
+alter table public.movimientos add column if not exists descuento integer not null default 0;   -- venta: descuento por ofertas
+alter table public.movimientos add column if not exists medio text check (medio in ('efectivo','debito','transferencia'));  -- venta
+alter table public.movimientos add column if not exists vence date;                              -- compra: fecha de vencimiento
+alter table public.movimientos add column if not exists vence_revisado boolean not null default false;
 create index if not exists movimientos_producto_at on public.movimientos (producto_id, at);
+create index if not exists movimientos_vence on public.movimientos (vence) where vence is not null;
 create index if not exists movimientos_at on public.movimientos (at desc);
 
 -- Stock calculado: último conteo + compras − ventas posteriores al conteo
-create or replace view public.productos_stock with (security_invoker = true) as
+create view public.productos_stock with (security_invoker = true) as
 select p.*,
   case when p.conteo_at is null then null else p.conteo_cant + coalesce((
     select sum(case m.tipo when 'compra' then m.cantidad when 'venta' then -m.cantidad else 0 end)
-    from movimientos m where m.producto_id = p.id and m.at > p.conteo_at), 0)::int end as stock,
+    from movimientos m where m.producto_id = p.id and m.at > p.conteo_at), 0) end as stock,
   case when p.conteo_at is null then coalesce((
-    select sum(m.cantidad) from movimientos m where m.producto_id = p.id and m.tipo = 'venta'), 0)::int
+    select sum(m.cantidad) from movimientos m where m.producto_id = p.id and m.tipo = 'venta'), 0)
   else 0 end as ventas_sin_contar
 from public.productos p;
 
--- Venta: [{"producto_id": "...", "cantidad": 2, "precio": 1990}, ...]
-create or replace function public.registrar_venta(items jsonb) returns uuid
+-- Venta: [{"producto_id": "...", "cantidad": 3, "precio": 590, "descuento": 270}, ...]
+-- medio: efectivo, debito o transferencia
+drop function if exists public.registrar_venta(jsonb);
+create or replace function public.registrar_venta(items jsonb, medio text default 'efectivo') returns uuid
 language plpgsql security definer set search_path = public as $$
 declare g uuid := gen_random_uuid();
 begin
   if not es_miembro() then raise exception 'Sin permiso'; end if;
   if jsonb_typeof(items) <> 'array' or jsonb_array_length(items) = 0 then raise exception 'Venta vacía'; end if;
-  insert into movimientos (producto_id, tipo, cantidad, precio, grupo, usuario_id)
-  select (i->>'producto_id')::uuid, 'venta', (i->>'cantidad')::int,
-         coalesce((i->>'precio')::int, p.precio), g, auth.uid()
+  if registrar_venta.medio not in ('efectivo','debito','transferencia') then raise exception 'Medio de pago no válido'; end if;
+  insert into movimientos (producto_id, tipo, cantidad, precio, descuento, medio, grupo, usuario_id)
+  select (i->>'producto_id')::uuid, 'venta', round((i->>'cantidad')::numeric, 3),
+         coalesce((i->>'precio')::int, p.precio), greatest(0, coalesce((i->>'descuento')::int, 0)),
+         registrar_venta.medio, g, auth.uid()
   from jsonb_array_elements(items) i join productos p on p.id = (i->>'producto_id')::uuid
-  where (i->>'cantidad')::int > 0;
+  where (i->>'cantidad')::numeric > 0;
   return g;
 end $$;
 
--- Recepción de mercadería: actualiza el costo y marca el producto como disponible
-create or replace function public.registrar_compra(proveedor text, items jsonb) returns uuid
+-- Recepción de mercadería: actualiza el costo, marca el producto como disponible y,
+-- si viene un proveedor de la lista, lo deja como proveedor del producto.
+-- items: [{"producto_id": "...", "cantidad": 24, "costo": 1300, "vence": "2026-11-02"}, ...]
+drop function if exists public.registrar_compra(text, jsonb);
+create or replace function public.registrar_compra(proveedor text, items jsonb, proveedor_id uuid default null) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare g uuid := gen_random_uuid();
 begin
   if not es_miembro() then raise exception 'Sin permiso'; end if;
-  insert into movimientos (producto_id, tipo, cantidad, costo, proveedor, grupo, usuario_id)
-  select (i->>'producto_id')::uuid, 'compra', (i->>'cantidad')::int, (i->>'costo')::int,
-         nullif(trim(registrar_compra.proveedor), ''), g, auth.uid()
-  from jsonb_array_elements(items) i where (i->>'cantidad')::int > 0;
-  update productos p set costo = coalesce((i->>'costo')::int, p.costo), tiene = true, actualizado = now()
+  insert into movimientos (producto_id, tipo, cantidad, costo, proveedor, vence, grupo, usuario_id)
+  select (i->>'producto_id')::uuid, 'compra', round((i->>'cantidad')::numeric, 3), (i->>'costo')::int,
+         nullif(trim(registrar_compra.proveedor), ''), nullif(i->>'vence','')::date, g, auth.uid()
+  from jsonb_array_elements(items) i where (i->>'cantidad')::numeric > 0;
+  update productos p set costo = coalesce((i->>'costo')::int, p.costo), tiene = true, actualizado = now(),
+    proveedor_id = coalesce(registrar_compra.proveedor_id, p.proveedor_id)
   from jsonb_array_elements(items) i
-  where p.id = (i->>'producto_id')::uuid and (i->>'cantidad')::int > 0;
+  where p.id = (i->>'producto_id')::uuid and (i->>'cantidad')::numeric > 0;
   return g;
+end $$;
+
+-- Marca un vencimiento como ya revisado (vendido, rebajado o retirado)
+create or replace function public.revisar_vencimiento(p_id uuid, p_revisado boolean default true) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  update movimientos set vence_revisado = p_revisado where id = p_id and tipo = 'compra';
 end $$;
 
 -- Conteo de un sector:
 -- [{"producto_id": "...", "cantidad": 12, "aproximado": false, "tiene": true}, ...]
 -- "cantidad" puede venir vacía si solo se cambia "tiene". Devuelve las diferencias.
+drop function if exists public.registrar_conteo(jsonb);
 create or replace function public.registrar_conteo(items jsonb)
-returns table (producto_id uuid, esperado integer, contado integer)
+returns table (producto_id uuid, esperado numeric, contado numeric)
 language plpgsql security definer set search_path = public as $$
-declare i jsonb; pid uuid; q int; esp int; g uuid := gen_random_uuid();
+declare i jsonb; pid uuid; q numeric; esp numeric; g uuid := gen_random_uuid();
 begin
   if not es_miembro() then raise exception 'Sin permiso'; end if;
   for i in select * from jsonb_array_elements(items) loop
@@ -172,7 +214,7 @@ begin
       if not (i->>'tiene')::boolean then continue; end if;
     end if;
     if coalesce(i->>'cantidad','') = '' then continue; end if;
-    q := greatest(0, (i->>'cantidad')::int);
+    q := greatest(0, round((i->>'cantidad')::numeric, 3));
     select s.stock into esp from productos_stock s where s.id = pid;
     update productos set conteo_cant = q, conteo_at = now(),
       aproximado = coalesce((i->>'aproximado')::boolean, false), actualizado = now()
@@ -183,6 +225,18 @@ begin
     return next;
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------
+-- Ofertas y packs: "3 galletas por $1.500"
+-- ---------------------------------------------------------------------
+create table if not exists public.ofertas (
+  id          uuid primary key default gen_random_uuid(),
+  producto_id uuid not null references public.productos(id) on delete cascade,
+  cantidad    integer not null check (cantidad between 2 and 100),
+  precio      integer not null check (precio > 0),     -- precio del pack completo
+  activa      boolean not null default true,
+  creado      timestamptz not null default now()
+);
 
 -- ---------------------------------------------------------------------
 -- Fiados (no afectan el inventario)
@@ -204,6 +258,56 @@ create table if not exists public.fiados (
   at         timestamptz not null default now()
 );
 create index if not exists fiados_cliente on public.fiados (cliente_id, at);
+alter table public.fiados add column if not exists medio text check (medio in ('efectivo','debito','transferencia'));  -- abono
+
+-- ---------------------------------------------------------------------
+-- Cierre de caja: compara lo vendido desde el cierre anterior con lo que hay en la caja
+-- ---------------------------------------------------------------------
+create table if not exists public.cierres (
+  id         uuid primary key default gen_random_uuid(),
+  desde      timestamptz not null,
+  hasta      timestamptz not null,
+  fondo      integer not null default 0,          -- efectivo con que se abrió la caja
+  esperado   jsonb not null,                      -- {"efectivo": 0, "debito": 0, "transferencia": 0}
+  contado    jsonb not null,
+  ventas     integer not null default 0,          -- cantidad de ventas
+  nota       text not null default '',
+  usuario_id uuid references auth.users(id) default auth.uid(),
+  at         timestamptz not null default now()
+);
+
+-- Lo que debería haber en la caja desde el último cierre (o desde el inicio del día)
+create or replace function public.resumen_caja() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare d timestamptz; v jsonb; a jsonb; n int;
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  d := coalesce((select max(hasta) from cierres),
+                (hoy_chile()::timestamp at time zone 'America/Santiago'));
+  select coalesce(jsonb_object_agg(medio, total), '{}'::jsonb) into v from (
+    select coalesce(medio,'efectivo') medio, sum(round(cantidad * precio) - descuento)::int total
+    from movimientos where tipo = 'venta' and at > d group by 1) x;
+  select coalesce(jsonb_object_agg(medio, total), '{}'::jsonb) into a from (
+    select coalesce(medio,'efectivo') medio, sum(monto)::int total
+    from fiados where tipo = 'abono' and at > d group by 1) x;
+  select count(distinct coalesce(grupo, id)) into n from movimientos where tipo = 'venta' and at > d;
+  return jsonb_build_object('desde', d, 'ventas', v, 'abonos', a, 'num_ventas', n);
+end $$;
+
+create or replace function public.registrar_cierre(p_fondo integer, p_contado jsonb, p_nota text default '') returns uuid
+language plpgsql security definer set search_path = public as $$
+declare r jsonb := resumen_caja(); m text; e jsonb := '{}'::jsonb; id uuid;
+begin
+  foreach m in array array['efectivo','debito','transferencia'] loop
+    e := e || jsonb_build_object(m, coalesce((r->'ventas'->>m)::int, 0) + coalesce((r->'abonos'->>m)::int, 0)
+                                   + case when m = 'efectivo' then coalesce(p_fondo, 0) else 0 end);
+  end loop;
+  insert into cierres (desde, hasta, fondo, esperado, contado, ventas, nota, usuario_id)
+  values ((r->>'desde')::timestamptz, now(), coalesce(p_fondo, 0), e, p_contado, (r->>'num_ventas')::int,
+          left(coalesce(p_nota, ''), 300), auth.uid())
+  returning cierres.id into id;
+  return id;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- Pan y reservas
@@ -326,6 +430,9 @@ alter table public.fiados      enable row level security;
 alter table public.ajustes     enable row level security;
 alter table public.panes       enable row level security;
 alter table public.reservas    enable row level security;
+alter table public.proveedores enable row level security;
+alter table public.ofertas     enable row level security;
+alter table public.cierres     enable row level security;
 
 do $$
 declare t text;
@@ -368,14 +475,31 @@ create policy "admin cambia panes"  on public.panes for all to authenticated usi
 create policy "miembros ven reservas"     on public.reservas for select to authenticated using (es_miembro());
 create policy "miembros cambian reservas" on public.reservas for update to authenticated using (es_miembro()) with check (es_miembro());
 
+create policy "miembros ven proveedores"     on public.proveedores for select to authenticated using (es_miembro());
+create policy "miembros agregan proveedores" on public.proveedores for insert to authenticated with check (es_miembro());
+create policy "miembros editan proveedores"  on public.proveedores for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "admin borra proveedores"      on public.proveedores for delete to authenticated using (es_admin());
+
+create policy "miembros ven ofertas"     on public.ofertas for select to authenticated using (es_miembro());
+create policy "miembros agregan ofertas" on public.ofertas for insert to authenticated with check (es_miembro());
+create policy "miembros editan ofertas"  on public.ofertas for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "miembros borran ofertas"  on public.ofertas for delete to authenticated using (es_miembro());
+
+-- Los cierres solo se crean con registrar_cierre y no se editan
+create policy "miembros ven cierres" on public.cierres for select to authenticated using (es_miembro());
+
 -- Las funciones internas no se exponen a visitantes sin sesión
 revoke execute on function public.nuevo_perfil() from public, anon, authenticated;
 revoke execute on function public.cuidar_admins() from public, anon, authenticated;
-revoke execute on function public.registrar_venta(jsonb) from public, anon;
-revoke execute on function public.registrar_compra(text, jsonb) from public, anon;
+revoke execute on function public.registrar_venta(jsonb, text) from public, anon;
+revoke execute on function public.registrar_compra(text, jsonb, uuid) from public, anon;
 revoke execute on function public.registrar_conteo(jsonb) from public, anon;
-grant execute on function public.registrar_venta(jsonb), public.registrar_compra(text, jsonb),
-  public.registrar_conteo(jsonb) to authenticated;
+revoke execute on function public.revisar_vencimiento(uuid, boolean) from public, anon;
+revoke execute on function public.resumen_caja() from public, anon;
+revoke execute on function public.registrar_cierre(integer, jsonb, text) from public, anon;
+grant execute on function public.registrar_venta(jsonb, text), public.registrar_compra(text, jsonb, uuid),
+  public.registrar_conteo(jsonb), public.revisar_vencimiento(uuid, boolean), public.resumen_caja(),
+  public.registrar_cierre(integer, jsonb, text) to authenticated;
 grant execute on function public.hay_admin(), public.info_reservas(), public.hoy_chile(),
   public.crear_reserva(text, text, jsonb, text, text), public.estado_reserva(uuid),
   public.cancelar_reserva(uuid) to anon, authenticated;
@@ -389,7 +513,7 @@ begin
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     create publication supabase_realtime;
   end if;
-  foreach t in array array['productos','movimientos','clientes','fiados','reservas','ajustes','perfiles','panes'] loop
+  foreach t in array array['productos','movimientos','clientes','fiados','reservas','ajustes','perfiles','panes','proveedores','ofertas','cierres'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;
@@ -437,3 +561,15 @@ select x.* from (values
  ('Detergente en polvo 1 kg','Aseo',3490,2400,3),('Jabón de tocador','Aseo',450,270,3)
 ) x(nombre, sector, precio, costo, minimo)
 where not exists (select 1 from public.productos);
+
+-- Pan y verduras a granel (precio por kilo) y el pan con botón rápido en Vender.
+-- Se agregan una vez, también en tiendas que ya tenían el catálogo anterior.
+insert into public.productos (nombre, sector, precio, costo, minimo, unidad, atajo)
+select x.* from (values
+ ('Marraqueta','Pan',2490,1700,2,'kg',true),('Hallulla','Pan',2490,1700,2,'kg',true),('Pan amasado','Pan',2990,2000,1,'kg',true),
+ ('Dobladitas','Pan',2990,2000,1,'kg',false),('Pan integral','Pan',2990,2000,1,'kg',false),
+ ('Tomate','Verduras',1490,900,2,'kg',false),('Papa','Verduras',990,550,3,'kg',false),('Cebolla','Verduras',990,550,2,'kg',false),
+ ('Zanahoria','Verduras',990,550,1,'kg',false),('Palta','Verduras',4990,3500,1,'kg',false),('Limón','Verduras',1990,1200,1,'kg',false),
+ ('Plátano','Verduras',1290,800,2,'kg',false),('Lechuga','Verduras',990,600,3,'un',false)
+) x(nombre, sector, precio, costo, minimo, unidad, atajo)
+where not exists (select 1 from public.productos where sector in ('Pan','Verduras'));
