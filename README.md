@@ -66,6 +66,10 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - Botón **"Avisar que llegó el pan"** que abre WhatsApp con el mensaje listo para enviarlo al grupo de clientes. El mensaje se puede editar o copiar y queda guardado.
 - **Reservas de pan** desde una página pública (`reservar.html`): el cliente elige el pan, si es para hoy o mañana, y recibe un código. En la tienda aparece al instante, con el total de pan a apartar, y se marca como entregada o se avisa por WhatsApp que está lista.
 
+**Página de la tienda (`tienda.html`)**
+- Página pública para clientes al estilo "link en bio": foto, nombre, descripción, dirección, horario y botones grandes (reservar pan, reseña en Google, grupo de WhatsApp, cómo llegar, redes sociales).
+- Se arma desde **Más > Página de la tienda**, sin tocar código; incluye **código QR** para imprimir y botones para enviar o copiar el link.
+
 **Multiusuario (con Supabase)**
 - Inicio de sesión con usuario y contraseña; roles de administradora y vendedor/a.
 - Todos los celulares y computadores ven el mismo stock y se actualizan en vivo.
@@ -75,6 +79,9 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - Diseño pensado para celular. **Más** separa Logística, Ayudas y Configuración, y cada pantalla tiene botón **Regresar** (también funciona el botón atrás del celular).
 - **Apariencia** por aparato: tema claro, oscuro o automático, 5 fuentes y colores personalizados.
 - **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Extensiones** si la tienda no los usa.
+- **Se instala como app** (PWA) en el celular o computador, con su ícono, desde **Más > Instalar la app**.
+- **Indicador de conexión** en la tienda: En línea, Reconectando… o Sin internet.
+- **Respaldo:** descargar todo en un archivo y **restaurarlo** después (solo agrega lo que falta, no borra nada).
 - Datos ficticios de ejemplo y botón **"Reiniciar demo"**.
 
 ## Tecnologías
@@ -115,6 +122,9 @@ También se puede abrir `index.html` directamente, pero el escaneo en vivo con l
 Inventario_almacen_VD/
 ├── index.html        # Toda la aplicación: estilos, vistas y lógica
 ├── reservar.html     # Página pública para que los clientes reserven pan
+├── tienda.html       # Página pública de la tienda con sus links
+├── pagina.js         # Tipos de links de la página de la tienda (compartido)
+├── manifest.webmanifest, sw.js, icons/   # Instalación como app
 ├── config.js         # URL y clave pública de Supabase (vacío = modo demo)
 ├── supabase/
 │   └── schema.sql    # Tablas, permisos (RLS), funciones y catálogo inicial
@@ -146,7 +156,7 @@ Dentro de `index.html` el código se organiza en bloques:
 
 ## Próximos pasos
 
-- Instalar la app en el celular y que siga funcionando si se corta internet.
+- Seguir vendiendo cuando se corta internet y sincronizar al volver.
 - Reportes de ventas y ganancia por día, semana y mes.
 - Anular una venta mal registrada (hoy los movimientos no se editan).
 

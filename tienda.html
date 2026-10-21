@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Reserva pan, deja tu reseña y únete al grupo de WhatsApp del almacén.">
+<title>Almacén</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Página pública de la tienda: foto, nombre y botones grandes, una sola columna */
+:root{
+  --bg:#f4f6f1; --surface:#ffffff; --fg:#1d2a22; --muted:#5d6b62; --line:#d7ddd2;
+  --brand:#1f5c3d; --brand-fg:#ffffff; --accent:#e0a526; --accent-fg:#1d1606; --hero:#dcefe2;
+  --font-display:"Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+  --font-body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r:16px; color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121814; --surface:#1a221d; --fg:#e6ece6; --muted:#9aa89e; --line:#2f3b33;
+  --brand:#5fb487; --brand-fg:#0f1a14; --accent:#f0bd4f; --hero:#1e3a2a; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#121814; --surface:#1a221d; --fg:#e6ece6; --muted:#9aa89e; --line:#2f3b33;
+  --brand:#5fb487; --brand-fg:#0f1a14; --accent:#f0bd4f; --hero:#1e3a2a; color-scheme:dark }
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.45}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{max-width:480px;margin:0 auto;padding:0 16px calc(32px + env(safe-area-inset-bottom,0px))}
+.hero{height:110px;margin:0 -16px;background:var(--hero);background-image:linear-gradient(135deg,var(--hero),color-mix(in srgb,var(--hero) 60%,var(--accent)))}
+.head{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;margin-top:-56px}
+.avatar{width:112px;height:112px;border-radius:50%;border:4px solid var(--bg);background:var(--brand);color:var(--brand-fg);display:grid;place-items:center;overflow:hidden;font-family:var(--font-display);font-weight:800;font-size:44px}
+.avatar img{width:100%;height:100%;object-fit:cover}
+h1{font-family:var(--font-display);font-weight:800;font-size:28px;line-height:1.1;margin:6px 0 0;letter-spacing:-.01em;text-wrap:balance}
+.desc{margin:0;color:var(--muted);max-width:36ch;white-space:pre-line}
+.facts{display:flex;flex-direction:column;gap:2px;font-size:14px;color:var(--muted);white-space:pre-line}
+.links{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+.link{display:flex;align-items:center;gap:14px;text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;font-weight:700;font-size:16px;min-height:64px}
+.link svg{width:28px;height:28px;flex:none;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.link span{flex:1}
+.link::after{content:"›";font-size:24px;color:var(--muted);line-height:1}
+.link.main{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.link.main svg{stroke:currentColor}
+.link.main::after{color:currentColor}
+.foot{margin-top:24px;text-align:center;font-size:12px;color:var(--muted)}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:20px;text-align:center;color:var(--muted)}
+.demo{background:var(--hero);border-radius:10px;padding:8px 12px;font-size:13px;margin-top:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="app" id="app"><p style="padding-top:40px;text-align:center;color:var(--muted)">Cargando…</p></div>
+
+<script src="config.js"></script>
+<script src="pagina.js"></script>
+<script>
+(function(){
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const CFG = window.ALMACEN_CONFIG || {};
+const { ICONS, tipo, href } = window.PAGINA;
+const params = new URLSearchParams(location.search);
+// Igual que la app: en la dirección del CV se muestra la página de la demo, salvo con ?tienda
+const demo = params.has("demo") || !CFG.supabaseUrl || ((CFG.direccionesDemo || []).includes(location.hostname) && !params.has("tienda"));
+// La foto solo puede ser una imagen guardada desde la app (data:image) o un link https
+const safeImg = u => /^data:image\/(png|jpe?g|webp);base64,/i.test(u || "") || /^https:\/\//i.test(u || "") ? u : "";
+
+function render(info){
+  const p = info.pagina || {}, links = (p.links || []).filter(l => href(l));
+  document.title = info.tienda;
+  const foto = safeImg(p.foto);
+  const reservar = info.reservas && p.mostrarReservas !== false;
+  $("#app").innerHTML = `<div class="hero"></div>
+  <div class="head">
+    <div class="avatar">${foto ? `<img src="${esc(foto)}" alt="">` : esc((info.tienda || "A").trim()[0].toUpperCase())}</div>
+    <h1>${esc(info.tienda)}</h1>
+    ${p.descripcion ? `<p class="desc">${esc(p.descripcion)}</p>` : ""}
+    ${p.direccion || p.horario ? `<div class="facts">${p.direccion ? `<span>${esc(p.direccion)}</span>` : ""}${p.horario ? `<span>${esc(p.horario)}</span>` : ""}</div>` : ""}
+  </div>
+  ${demo ? `<div class="demo">Página de ejemplo con datos ficticios.</div>` : ""}
+  <div class="links">
+    ${reservar ? `<a class="link main" href="${demo ? "./" : "reservar.html"}">${ICONS.pan}<span>Reserva tu pan</span></a>` : ""}
+    ${links.map(l => { const h = href(l), ext = /^https?:/.test(h);
+      return `<a class="link" href="${esc(h)}" ${ext ? 'target="_blank" rel="noopener"' : ""}>${ICONS[l.tipo] || ICONS.otro}<span>${esc(l.titulo || tipo(l.tipo)[1])}</span></a>`; }).join("")}
+    ${!reservar && !links.length ? `<div class="empty">Pronto vas a encontrar aquí los links del almacén.</div>` : ""}
+  </div>
+  <p class="foot">${esc(info.tienda)}</p>`;
+}
+
+async function start(){
+  if (demo){
+    let S = null; try { S = JSON.parse(localStorage.getItem("almacen-demo-v2")); } catch(e){}
+    return render({ tienda:"Almacén de ejemplo", reservas:true, pagina:(S && S.pagina) || {
+      descripcion:"Almacén de barrio · pan calentito todos los días", direccion:"Calle Ejemplo 123", horario:"Lunes a sábado de 8:00 a 21:00",
+      links:[{ tipo:"resena", valor:"https://example.com" }, { tipo:"grupo", valor:"https://example.com" }, { tipo:"maps", valor:"https://example.com" }] } });
+  }
+  try {
+    if (!window.supabase) await new Promise((res, rej) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+    const sb = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ persistSession:false, autoRefreshToken:false } });
+    const { data, error } = await sb.rpc("info_tienda"); if (error) throw error;
+    render(data);
+  } catch(e){
+    $("#app").innerHTML = `<div class="empty" style="margin-top:40px">No se pudo cargar la página. Revisa tu conexión a internet e intenta de nuevo.<br><br><a href="" style="font-weight:700">Reintentar</a></div>`;
+  }
+}
+start();
+})();
+</script>
+</body>
+</html>
