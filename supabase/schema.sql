@@ -531,7 +531,7 @@ insert into public.ajustes (clave, valor) values
 on conflict (clave) do nothing;
 
 insert into public.panes (nombre, orden)
-select x.nombre, x.orden from (values ('Marraquetas',1),('Hallullas',2),('Pan amasado',3),('Dobladitas',4),('Pan integral',5)) x(nombre, orden)
+select x.nombre, x.orden from (values ('Marraqueta',1),('Hallulla',2),('Pan amasado',3),('Dobladitas',4),('Pan integral',5)) x(nombre, orden)
 where not exists (select 1 from public.panes);
 
 -- Catálogo típico de almacén (precios de referencia; se ajustan en la app)
@@ -562,14 +562,30 @@ select x.* from (values
 ) x(nombre, sector, precio, costo, minimo)
 where not exists (select 1 from public.productos);
 
--- Pan y verduras a granel (precio por kilo) y el pan con botón rápido en Vender.
+-- Pan por unidad (con botón rápido en Vender) y verduras a granel (precio por kilo).
 -- Se agregan una vez, también en tiendas que ya tenían el catálogo anterior.
 insert into public.productos (nombre, sector, precio, costo, minimo, unidad, atajo)
 select x.* from (values
- ('Marraqueta','Pan',2490,1700,2,'kg',true),('Hallulla','Pan',2490,1700,2,'kg',true),('Pan amasado','Pan',2990,2000,1,'kg',true),
- ('Dobladitas','Pan',2990,2000,1,'kg',false),('Pan integral','Pan',2990,2000,1,'kg',false),
+ ('Marraqueta','Pan',250,160,10,'un',true),('Hallulla','Pan',250,160,10,'un',true),('Pan amasado','Pan',400,260,10,'un',true),
+ ('Dobladitas','Pan',250,160,10,'un',false),('Pan integral','Pan',300,200,10,'un',false),
  ('Tomate','Verduras',1490,900,2,'kg',false),('Papa','Verduras',990,550,3,'kg',false),('Cebolla','Verduras',990,550,2,'kg',false),
  ('Zanahoria','Verduras',990,550,1,'kg',false),('Palta','Verduras',4990,3500,1,'kg',false),('Limón','Verduras',1990,1200,1,'kg',false),
  ('Plátano','Verduras',1290,800,2,'kg',false),('Lechuga','Verduras',990,600,3,'un',false)
 ) x(nombre, sector, precio, costo, minimo, unidad, atajo)
 where not exists (select 1 from public.productos where sector in ('Pan','Verduras'));
+
+-- El pan se vende por unidad (la primera versión lo tenía por kilo). Se hace una sola vez,
+-- para no deshacer cambios que la tienda haga después. Los nombres de las reservas
+-- quedan iguales a los productos para que "Tipos de pan" maneje ambos.
+do $$
+begin
+  if not exists (select 1 from public.ajustes where clave = 'pan_por_unidad') then
+    update public.productos set unidad = 'un', minimo = 10, conteo_cant = null, conteo_at = null,
+      precio = case nombre when 'Pan amasado' then 400 when 'Pan integral' then 300 else 250 end,
+      costo  = case nombre when 'Pan amasado' then 260 when 'Pan integral' then 200 else 160 end
+    where sector = 'Pan' and unidad = 'kg';
+    update public.panes set nombre = 'Marraqueta' where nombre = 'Marraquetas' and not exists (select 1 from public.panes where nombre = 'Marraqueta');
+    update public.panes set nombre = 'Hallulla'   where nombre = 'Hallullas'   and not exists (select 1 from public.panes where nombre = 'Hallulla');
+    insert into public.ajustes (clave, valor) values ('pan_por_unidad', 'true');
+  end if;
+end $$;
