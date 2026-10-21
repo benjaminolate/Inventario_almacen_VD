@@ -549,8 +549,11 @@ const isFinalErr = e => !isNetErr(e) && (e?.code === "P0001" || /^2[23]/.test(e?
 function withTimeout(req, ms){ const c = new AbortController(); setTimeout(() => c.abort(), ms); return req.abortSignal(c.signal); }
 async function sendItem(it){
   if (it.kind === "venta"){
-    await q(withTimeout(sb.rpc("registrar_venta", { items: it.lines.map(l => ({ producto_id:l.pid, cantidad:l.qty, precio:l.price, descuento:l.disc })),
-      medio:it.medio, grupo_id:it.id, hora:new Date(it.at).toISOString() }), 10000));
+    const items = it.lines.map(l => ({ producto_id:l.pid, cantidad:l.qty, precio:l.price, descuento:l.disc }));
+    try { await q(withTimeout(sb.rpc("registrar_venta", { items, medio:it.medio, grupo_id:it.id, hora:new Date(it.at).toISOString() }), 10000)); }
+    catch(e){ if (e?.code !== "PGRST202") throw e;
+      // La base de datos todavía no tiene la versión nueva (falta ejecutar schema.sql): se usa la anterior
+      await q(withTimeout(sb.rpc("registrar_venta", { items, medio:it.medio }), 10000)); }
     S.movs = S.movs.filter(m => !(m.pending && m.id.startsWith(it.id + "-")));
     const rows = await q(sb.from("movimientos").select("*").eq("grupo", it.id));
     rows.forEach(r => { if (!S.movs.some(m => m.id === r.id)) S.movs.push(movFromRow(r)); });
