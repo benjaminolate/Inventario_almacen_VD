@@ -53,8 +53,9 @@ La clave pública está hecha para ir en la página: lo que cada persona puede v
 
 La misma página sirve de demo pública y de sistema de la tienda. La dirección normal (`https://benjaminolate.github.io/Inventario_almacen_VD/`) sigue mostrando la demo, por ejemplo para quien llega desde un CV. **La tienda se abre agregando `?tienda` al final:** `https://benjaminolate.github.io/Inventario_almacen_VD/?tienda`. Cada celular o computador lo recuerda después de abrir ese link una vez, así que conviene guardarlo en la pantalla de inicio.
 
-1. Abre la página de la tienda (con `?tienda`), apenas esté publicada: el primero que crea una cuenta queda como administradora. Como todavía no hay cuentas, aparece **Configurar la tienda**: ahí se crea la cuenta de la administradora (nombre, usuario y contraseña).
-2. En **Más > Equipo y cuenta**, la administradora agrega a las demás personas con **+ Agregar** y les entrega su usuario y contraseña.
+1. Abre la página de la tienda (con `?tienda`), apenas esté publicada: el primero que crea una cuenta queda como **cuenta maestra**. Como todavía no hay cuentas, aparece **Configurar la tienda**: ahí se crea (nombre, usuario y contraseña). Hazlo apenas publiques la página, para que nadie más la cree antes.
+   - La cuenta maestra es administradora para siempre: nadie más puede cambiarle el usuario, la contraseña ni los permisos, ni quitarle el acceso. Sirve de llave de repuesto si alguien pierde su contraseña.
+2. En **Más > Equipo y cuenta**, se agregan las demás personas con **+ Agregar** y se les entrega su usuario y contraseña. Tocando a una persona se le cambia el nombre, el usuario, la contraseña, los permisos o el acceso.
 3. Antes de empezar, conviene revisar en **Productos** los nombres y precios del catálogo inicial, y en **Más > Equipo y cuenta** el nombre de la tienda que ven los clientes.
 4. El conteo parte desde cero: se cuenta un sector a la vez, igual que en la demo.
 
@@ -81,6 +82,7 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 | Anotar fiados y pagos | Sí | Sí |
 | Atender y cerrar reservas | Sí | Sí |
 | Agregar personas, quitar acceso, cambiar permisos | Sí | No |
+| Cambiar usuario o contraseña de otra persona | Sí (menos la cuenta maestra) | No |
 | Nombre de la tienda, página de la tienda | Sí | No |
 | Restaurar un respaldo | Sí | No |
 | Proveedores, ofertas, cierre de caja | Sí | Sí |
@@ -90,7 +92,7 @@ Las ventas, compras y conteos quedan registrados con la hora del servidor y la p
 
 ## Cosas a saber
 
-- **Contraseña olvidada:** la administradora la cambia en el panel de Supabase, en **Authentication > Users**, eligiendo a la persona y la opción para cambiar la contraseña. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**.
+- **Contraseña olvidada:** la administradora le pone una nueva en **Más > Equipo y cuenta**, tocando a la persona. Si la que olvidó la contraseña es la única administradora, se entra con la cuenta maestra. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**. Si se pierde la contraseña de la cuenta maestra, se cambia en el panel de Supabase (**Authentication > Users**).
 - **Plan gratuito:** Supabase pausa los proyectos gratuitos que pasan una semana sin uso. Una tienda que lo usa todos los días no se pausa; si se pausa, se reactiva desde el panel.
 - **Respaldo:** el plan gratuito no guarda copias descargables. La administradora puede descargar una copia de todo en **Más > Respaldo > Descargar respaldo** (un archivo con la fecha en el nombre); conviene hacerlo una vez por semana y guardarlo en el computador o en Google Drive. En la misma pantalla, **Elegir archivo de respaldo** lo vuelve a cargar: muestra qué trae y solo agrega lo que falta, sin borrar ni cambiar nada de lo que ya está. Sirve, por ejemplo, para pasar todo a un proyecto de Supabase nuevo (las cuentas de usuario no viajan en el respaldo; se vuelven a crear en Equipo). También se pueden exportar tablas sueltas en **Table Editor** (*Export to CSV*).
 - **Instalar la app:** en **Más > Instalar la app** están los pasos para cada celular. Queda con su ícono y abre más rápido; igual necesita internet para vender.

@@ -1320,29 +1320,43 @@ function viewEquipo(){
   <div class="stack">
     <h2>Equipo y cuenta</h2>
     <div class="card stack">
-      <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${me.rol === "admin" ? "Administradora" : "Vendedor/a"}</div></div><button class="btn sm" id="logout">Salir</button></div>
+      <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${rolName(me)}</div></div><button class="btn sm" id="logout">Salir</button></div>
       <button class="btn block" id="mypass">Cambiar mi contraseña</button>
     </div>
     ${isAdmin() ? `<div class="card"><div class="spread"><h3>Personas de la tienda</h3><button class="btn sm primary" id="addu">+ Agregar</button></div>
       <div class="list">${team.map(t => `<button class="item tap" data-user="${t.id}"><div class="main"><div class="name">${esc(t.nombre)}${t.id === me.id ? " (tú)" : ""}</div><div class="sub">Usuario ${esc(t.usuario)}</div></div>
-        ${!t.activo ? `<span class="pill bad">Sin acceso</span>` : t.rol === "admin" ? `<span class="pill ok">Administradora</span>` : `<span class="pill none">Vendedor/a</span>`}</button>`).join("")}</div></div>
+        ${!t.activo ? `<span class="pill bad">Sin acceso</span>` : `<span class="pill ${t.rol === "admin" ? "ok" : "none"}">${rolName(t)}</span>`}</button>`).join("")}</div></div>
     <div class="card stack"><h3>Tienda</h3>
       <div class="field"><label for="tname">Nombre que ven los clientes</label><div class="searchbar"><input class="input" id="tname" value="${esc(db.ajustes.tienda_nombre || "Almacén")}"><button class="btn" id="tsave">Guardar</button></div></div></div>
-    <p class="small muted" style="margin:0">Vendedores/as pueden vender, recibir, contar, anotar fiados y atender reservas. Solo la administradora agrega personas y cambia permisos.</p>` : ""}
+    <p class="small muted" style="margin:0">Vendedores/as pueden vender, recibir, contar, anotar fiados y atender reservas. Solo la administradora agrega personas, cambia permisos y cambia usuarios o contraseñas. La cuenta maestra solo la cambia su dueño.</p>` : ""}
   </div>`;
 }
+const rolName = t => t.maestra ? "Cuenta maestra" : t.rol === "admin" ? "Administradora" : "Vendedor/a";
 function openPersona(t){
+  const me = db.profile, mine = t.id === me.id, locked = t.maestra && !mine;
   openModal(`<div class="stack">
     <div class="spread"><h2>${esc(t.nombre)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
-    <p class="small muted" style="margin:0">Usuario para entrar: <b>${esc(t.usuario)}</b></p>
+    ${locked ? `<p style="margin:0">Usuario para entrar: <b>${esc(t.usuario)}</b></p>
+      <p class="small muted" style="margin:0">Es la cuenta maestra: siempre es administradora y solo su dueño puede cambiar su usuario o contraseña.</p>` : `
+    <div class="field"><label for="unom">Nombre</label><input class="input" id="unom" value="${esc(t.nombre)}"></div>
+    <div class="field"><label for="uusr">Usuario para entrar</label><input class="input" id="uusr" autocapitalize="none" autocomplete="off" value="${esc(t.usuario)}"></div>
+    <div class="field"><label for="upw">Contraseña nueva</label><input class="input" id="upw" type="text" autocomplete="off" placeholder="Dejar vacío para no cambiarla"></div>
+    ${t.maestra ? `<p class="small muted" style="margin:0">Es tu cuenta maestra: siempre es administradora y nadie más la puede cambiar.</p>` : `
     <div class="field"><label for="urol">Permisos</label><select class="input" id="urol"><option value="vendedor" ${t.rol==="vendedor"?"selected":""}>Vendedor/a</option><option value="admin" ${t.rol==="admin"?"selected":""}>Administradora</option></select></div>
-    <label class="row"><input type="checkbox" id="uact" ${t.activo?"checked":""}> Puede entrar al sistema</label>
+    <label class="row"><input type="checkbox" id="uact" ${t.activo?"checked":""}> Puede entrar al sistema</label>`}
     <button class="btn primary block" id="usave">Guardar</button>
-    <p class="small muted" style="margin:0">Si alguien olvida su contraseña, se cambia desde el panel de Supabase (Authentication > Users).</p>
+    <p class="small muted" style="margin:0">Si cambias el usuario o la contraseña, entrégale los nuevos datos a la persona.</p>`}
   </div>`);
+  if (locked) return;
   $("#usave").onclick = () => run(async () => {
-    await q(sb.from("perfiles").update({ rol:$("#urol").value, activo:$("#uact").checked }).eq("id", t.id));
-    await dbLoadAll(); closeModal(); render(); toast("Cambios guardados"); });
+    const nombre = $("#unom").value.trim(), usuario = $("#uusr").value.trim().toLowerCase(), pw = $("#upw").value;
+    if (!nombre) return $("#unom").focus(); if (!usuario) return $("#uusr").focus();
+    if (pw && pw.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
+    const cambios = { nombre }; if (!t.maestra){ cambios.rol = $("#urol").value; cambios.activo = $("#uact").checked; }
+    await q(sb.from("perfiles").update(cambios).eq("id", t.id));
+    if (usuario !== t.usuario || pw) await q(sb.rpc("cambiar_acceso", { persona:t.id, usuario_nuevo:usuario, clave_nueva:pw || null }));
+    await dbLoadAll(); closeModal(); render();
+    toast(mine && usuario !== t.usuario ? `Listo. Desde ahora entras con el usuario ${usuario}` : "Cambios guardados"); });
 }
 // Crea la cuenta con un cliente aparte, para no cerrar la sesión de la administradora
 async function createAccount(nombre, usuario, pass, client){
@@ -1991,7 +2005,7 @@ async function showLogin(){
   try { first = !(await q(sb.rpc("hay_admin"))); } catch(e){}
   gate(`${gateHead()}<div class="stack">
     ${first ? `<div class="card stack"><h2>Configurar la tienda</h2>
-      <p class="small muted" style="margin:0">Todavía no hay cuentas. Crea la cuenta de la administradora: con ella se agregan después las demás personas.</p>
+      <p class="small muted" style="margin:0">Todavía no hay cuentas. Crea la cuenta maestra: es la administradora principal, nadie más la puede cambiar ni quitarle el acceso, y con ella se agregan después las demás personas.</p>
       <div class="field"><label for="an">Nombre</label><input class="input" id="an" placeholder="Ej: Rosa"></div>
       <div class="field"><label for="au">Usuario para entrar</label><input class="input" id="au" autocapitalize="none" autocomplete="username" placeholder="Ej: rosa"></div>
       <div class="field"><label for="ap">Contraseña (mínimo 6 caracteres)</label><input class="input" id="ap" type="password" autocomplete="new-password"></div>
