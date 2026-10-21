@@ -488,6 +488,61 @@ create policy "miembros borran ofertas"  on public.ofertas for delete to authent
 -- Los cierres solo se crean con registrar_cierre y no se editan
 create policy "miembros ven cierres" on public.cierres for select to authenticated using (es_miembro());
 
+-- ---------------------------------------------------------------------
+-- Página pública de la tienda (tienda.html): nombre, foto, descripción y links
+-- que la administradora edita en la app. Se guarda en ajustes.pagina.
+-- ---------------------------------------------------------------------
+create or replace function public.info_tienda() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'tienda',   coalesce((select valor #>> '{}' from ajustes where clave = 'tienda_nombre'), 'Almacén'),
+    'pagina',   coalesce((select valor from ajustes where clave = 'pagina'), '{}'::jsonb),
+    'reservas', coalesce((select (valor #>> '{}')::boolean from ajustes where clave = 'reservas_abiertas'), true)
+                and coalesce((select (valor ->> 'pan')::boolean from ajustes where clave = 'extensiones'), true));
+$$;
+
+-- ---------------------------------------------------------------------
+-- Restaurar un respaldo descargado desde la app (solo administradora).
+-- Agrega lo que falta y no borra ni cambia lo que ya existe. Las cuentas no
+-- se restauran: lo hecho por personas que ya no existen queda sin autor.
+-- Los productos del catálogo inicial que nunca se usaron y que se llaman igual
+-- que uno del respaldo se reemplazan por el del respaldo (caso: proyecto nuevo).
+-- ---------------------------------------------------------------------
+create or replace function public.restaurar_respaldo(datos jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  t text; arr jsonb; cols text; sel text; n int; res jsonb := '{}'::jsonb;
+  orden text[] := array['proveedores','productos','clientes','fiados','ofertas','panes','ajustes','movimientos','cierres','reservas'];
+begin
+  if not es_admin() then raise exception 'Solo la administradora puede restaurar un respaldo'; end if;
+  datos := coalesce(datos->'tablas', datos);
+  if jsonb_typeof(datos->'productos') is distinct from 'array' then raise exception 'El archivo no parece un respaldo de la tienda'; end if;
+  delete from productos p
+  where not exists (select 1 from jsonb_array_elements(datos->'productos') e where (e->>'id')::uuid = p.id)
+    and exists (select 1 from jsonb_array_elements(datos->'productos') e where e->>'nombre' = p.nombre)
+    and not exists (select 1 from movimientos m where m.producto_id = p.id)
+    and not exists (select 1 from ofertas o where o.producto_id = p.id);
+  foreach t in array orden loop
+    arr := datos->t;
+    if jsonb_typeof(arr) is distinct from 'array' or jsonb_array_length(arr) = 0 then continue; end if;
+    -- Columnas que trae el respaldo y que existen en la tabla (los respaldos antiguos traen menos)
+    select string_agg(quote_ident(c.column_name), ', ' order by c.ordinal_position),
+           string_agg(case when c.column_name in ('usuario_id','entregado_por')
+                        then format('(select u.id from auth.users u where u.id = r.%I)', c.column_name)
+                        else 'r.' || quote_ident(c.column_name) end, ', ' order by c.ordinal_position)
+      into cols, sel
+    from information_schema.columns c
+    where c.table_schema = 'public' and c.table_name = t and arr->0 ? c.column_name;
+    if cols is null then continue; end if;
+    execute format('insert into public.%I (%s) select %s from jsonb_populate_recordset(null::public.%I, $1) r on conflict do nothing', t, cols, sel, t)
+      using arr;
+    get diagnostics n = row_count;
+    res := res || jsonb_build_object(t, n);
+  end loop;
+  perform setval(pg_get_serial_sequence('public.panes', 'id'), greatest((select max(id) from panes), 1));
+  return res;
+end $$;
+
 -- Las funciones internas no se exponen a visitantes sin sesión
 revoke execute on function public.nuevo_perfil() from public, anon, authenticated;
 revoke execute on function public.cuidar_admins() from public, anon, authenticated;
@@ -497,10 +552,12 @@ revoke execute on function public.registrar_conteo(jsonb) from public, anon;
 revoke execute on function public.revisar_vencimiento(uuid, boolean) from public, anon;
 revoke execute on function public.resumen_caja() from public, anon;
 revoke execute on function public.registrar_cierre(integer, jsonb, text) from public, anon;
+revoke execute on function public.restaurar_respaldo(jsonb) from public, anon;
+grant execute on function public.restaurar_respaldo(jsonb) to authenticated;
 grant execute on function public.registrar_venta(jsonb, text), public.registrar_compra(text, jsonb, uuid),
   public.registrar_conteo(jsonb), public.revisar_vencimiento(uuid, boolean), public.resumen_caja(),
   public.registrar_cierre(integer, jsonb, text) to authenticated;
-grant execute on function public.hay_admin(), public.info_reservas(), public.hoy_chile(),
+grant execute on function public.hay_admin(), public.info_reservas(), public.info_tienda(), public.hoy_chile(),
   public.crear_reserva(text, text, jsonb, text, text), public.estado_reserva(uuid),
   public.cancelar_reserva(uuid) to anon, authenticated;
 

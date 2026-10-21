@@ -65,6 +65,13 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 - En la tienda se ve cuánto pan apartar, se marca cada reserva como entregada y, si el cliente dejó su celular, se le avisa por WhatsApp.
 - Se puede cerrar las reservas en cualquier momento y elegir hasta qué hora se aceptan reservas para el mismo día.
 
+## Página de la tienda
+
+- Es `tienda.html`, una página para clientes con la foto del almacén, descripción, dirección, horario y botones a la reseña de Google, el grupo de WhatsApp, cómo llegar, redes sociales y la reserva de pan.
+- Se edita en **Más > Página de la tienda**: **+ Agregar link**, elegir el tipo y pegar el link (cada tipo explica dónde conseguirlo). El orden se cambia con las flechas.
+- Ahí mismo está el **código QR** para imprimir y pegar en el mostrador, y los botones para enviar o copiar el link.
+- Cualquier persona puede verla sin cuenta; solo la administradora la cambia.
+
 ## Quién puede hacer qué
 
 | | Administradora | Vendedor/a |
@@ -74,7 +81,8 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 | Anotar fiados y pagos | Sí | Sí |
 | Atender y cerrar reservas | Sí | Sí |
 | Agregar personas, quitar acceso, cambiar permisos | Sí | No |
-| Nombre de la tienda | Sí | No |
+| Nombre de la tienda, página de la tienda | Sí | No |
+| Restaurar un respaldo | Sí | No |
 | Proveedores, ofertas, cierre de caja | Sí | Sí |
 | Encender o apagar extensiones | Sí | No |
 
@@ -84,5 +92,7 @@ Las ventas, compras y conteos quedan registrados con la hora del servidor y la p
 
 - **Contraseña olvidada:** la administradora la cambia en el panel de Supabase, en **Authentication > Users**, eligiendo a la persona y la opción para cambiar la contraseña. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**.
 - **Plan gratuito:** Supabase pausa los proyectos gratuitos que pasan una semana sin uso. Una tienda que lo usa todos los días no se pausa; si se pausa, se reactiva desde el panel.
-- **Respaldo:** el plan gratuito no guarda copias descargables. La administradora puede descargar una copia de todo en **Más > Equipo y cuenta > Descargar respaldo** (un archivo con la fecha en el nombre); conviene hacerlo una vez por semana y guardarlo en el computador o en Google Drive. También se pueden exportar tablas sueltas en **Table Editor** (*Export to CSV*).
+- **Respaldo:** el plan gratuito no guarda copias descargables. La administradora puede descargar una copia de todo en **Más > Respaldo > Descargar respaldo** (un archivo con la fecha en el nombre); conviene hacerlo una vez por semana y guardarlo en el computador o en Google Drive. En la misma pantalla, **Elegir archivo de respaldo** lo vuelve a cargar: muestra qué trae y solo agrega lo que falta, sin borrar ni cambiar nada de lo que ya está. Sirve, por ejemplo, para pasar todo a un proyecto de Supabase nuevo (las cuentas de usuario no viajan en el respaldo; se vuelven a crear en Equipo). También se pueden exportar tablas sueltas en **Table Editor** (*Export to CSV*).
+- **Instalar la app:** en **Más > Instalar la app** están los pasos para cada celular. Queda con su ícono y abre más rápido; igual necesita internet para vender.
+- **Conexión:** arriba a la derecha se ve si hay conexión (*En línea*), si se está reconectando o si no hay internet. Sin internet no se guardan ventas.
 - **Demo:** la dirección normal muestra la demo con datos ficticios, y en un celular de la tienda se puede abrir con `?demo` o con el botón *Ver demo con datos ficticios* de la pantalla de inicio de sesión. La demo nunca toca la base de datos.
