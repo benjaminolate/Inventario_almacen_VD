@@ -90,6 +90,16 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 
 Las ventas, compras y conteos quedan registrados con la hora del servidor y la persona que los hizo, y no se pueden editar ni borrar desde la app.
 
+## Seguridad
+
+- **Registro cerrado:** solo se pueden crear cuentas desde **Más > Equipo y cuenta > + Agregar**. Cualquier otro intento de registrarse, por ejemplo llamando directo a la API, se rechaza. Por lo mismo, las personas no se crean desde el panel de Supabase (*Add user*) sino desde la app.
+- **Fuerza bruta:** Supabase limita por IP los intentos de inicio de sesión y guarda las contraseñas cifradas (bcrypt). Los límites están en **Authentication > Rate Limits**; los que vienen de fábrica sirven.
+- **Reservas:** como mucho 5 reservas por hora desde una misma conexión, 3 pendientes por celular para el mismo día y 40 en total cada 10 minutos. De la conexión se guarda solo una huella cifrada, nunca la IP.
+- **DDoS:** Cloudflare sirve la página desde su red con protección incluida, y Supabase tiene la suya delante de la base de datos.
+- **Cabeceras de seguridad:** el archivo `_headers` hace que Cloudflare entregue la página con una política que solo permite cargar código desde la propia página, jsDelivr y Supabase, y que impide meterla dentro de otra página.
+- **Revisión periódica:** en **Advisors > Security Advisor** del panel de Supabase no deberían aparecer tablas sin RLS.
+- **Claves:** en `config.js` va solo la clave pública. La `service_role` (o `sb_secret_…`) nunca se pone en la app ni en el repositorio.
+
 ## Cosas a saber
 
 - **Contraseña olvidada:** la administradora le pone una nueva en **Más > Equipo y cuenta**, tocando a la persona. Si la que olvidó la contraseña es la única administradora, se entra con la cuenta maestra. Cada persona puede cambiar la suya en **Más > Equipo y cuenta**. Si se pierde la contraseña de la cuenta maestra, se cambia en el panel de Supabase (**Authentication > Users**).

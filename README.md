@@ -82,6 +82,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Se instala como app** (PWA) en el celular o computador, con su ícono, desde **Más > Instalar la app**.
 - **Indicador de conexión** en la tienda: En línea, Reconectando… o Sin internet.
 - **Sin internet:** las ventas y los fiados se guardan en el celular y se envían solos al volver la conexión, sin duplicarse.
+- **Seguridad:** registro cerrado (solo la administradora crea cuentas), cuenta maestra protegida, límites contra reservas falsas y cabeceras de seguridad en Cloudflare (`_headers`).
 - **Respaldo:** descargar todo en un archivo y **restaurarlo** después (solo agrega lo que falta, no borra nada).
 - Datos ficticios de ejemplo y botón **"Reiniciar demo"**.
 
