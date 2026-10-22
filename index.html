@@ -1455,7 +1455,8 @@ function openNuevaPersona(){
   $("#nusave").onclick = () => run(async () => {
     const nombre = $("#nun").value.trim(), usuario = $("#nuu").value.trim(), pass = $("#nup").value;
     if (!nombre) return $("#nun").focus(); if (!usuario) return $("#nuu").focus(); if (pass.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
-    await q(sb.rpc("invitar", { p_usuario:usuario }));   // el registro está cerrado salvo para quien invita la administradora
+    // El registro está cerrado salvo para quien invita la administradora (si falta ejecutar schema.sql, la función aún no existe)
+    await q(sb.rpc("invitar", { p_usuario:usuario })).catch(e => { if (e?.code !== "PGRST202") throw e; });
     const tmp = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"almacen-alta" } });
     const data = await createAccount(nombre, usuario, pass, tmp);
     await q(sb.from("perfiles").update({ activo:true }).eq("id", data.user.id));
