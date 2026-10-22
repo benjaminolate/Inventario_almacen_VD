@@ -430,6 +430,7 @@ function friendly(e){
   if (/Failed to fetch|NetworkError|Load failed|sin conexión/i.test(m)) return "Sin conexión a internet. No se guardó; intenta de nuevo.";
   if (/Invalid login credentials/i.test(m)) return "Usuario o contraseña incorrectos";
   if (/already registered/i.test(m)) return "Ese usuario ya existe";
+  if (/Database error saving new user|Registro cerrado/i.test(m)) return "No se pudo crear la cuenta: solo la administradora puede agregar personas, desde Más > Equipo y cuenta.";
   if (/Password should be/i.test(m)) return "La contraseña debe tener al menos 6 caracteres";
   return m || "Algo salió mal";
 }
@@ -1454,6 +1455,7 @@ function openNuevaPersona(){
   $("#nusave").onclick = () => run(async () => {
     const nombre = $("#nun").value.trim(), usuario = $("#nuu").value.trim(), pass = $("#nup").value;
     if (!nombre) return $("#nun").focus(); if (!usuario) return $("#nuu").focus(); if (pass.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
+    await q(sb.rpc("invitar", { p_usuario:usuario }));   // el registro está cerrado salvo para quien invita la administradora
     const tmp = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false, storageKey:"almacen-alta" } });
     const data = await createAccount(nombre, usuario, pass, tmp);
     await q(sb.from("perfiles").update({ activo:true }).eq("id", data.user.id));

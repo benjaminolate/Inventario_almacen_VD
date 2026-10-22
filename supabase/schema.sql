@@ -42,14 +42,39 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from perfiles where rol = 'admin' and activo);
 $$;
 
+-- Registro cerrado: solo se crean cuentas que la administradora agregó desde
+-- Equipo (queda una invitación por una hora). Así nadie de afuera llena la
+-- lista de usuarios aunque llame directo a la API de registro.
+create table if not exists public.invitaciones (
+  usuario text primary key,
+  creado  timestamptz not null default now(),
+  por     uuid references auth.users(id) on delete cascade default auth.uid()
+);
+alter table public.invitaciones enable row level security;   -- sin políticas: solo por las funciones
+
+create or replace function public.invitar(p_usuario text) returns void
+language plpgsql security definer set search_path = public as $$
+declare u text := regexp_replace(lower(trim(coalesce(p_usuario, ''))), '\s+', '.', 'g');
+begin
+  if not es_admin() then raise exception 'Solo la administradora puede agregar personas'; end if;
+  if u !~ '^[a-z0-9._-]{2,40}$' then raise exception 'El usuario solo puede tener letras sin tilde, números, punto o guion'; end if;
+  delete from invitaciones where creado < now() - interval '1 hour';
+  insert into invitaciones (usuario) values (u) on conflict (usuario) do update set creado = now(), por = auth.uid();
+end $$;
+
 -- Cada cuenta nueva crea su perfil. La primera queda como administradora;
--- las demás quedan inactivas hasta que la administradora las activa.
+-- las demás necesitan invitación y quedan inactivas hasta que la administradora las activa.
 create or replace function public.nuevo_perfil() returns trigger
 language plpgsql security definer set search_path = public as $$
-declare primera boolean;
+declare primera boolean; invitado text;
 begin
   perform pg_advisory_xact_lock(4242);
   primera := not exists (select 1 from perfiles where rol = 'admin');
+  if not primera then
+    delete from invitaciones where usuario = lower(split_part(new.email, '@', 1)) and creado > now() - interval '1 hour'
+      returning usuario into invitado;
+    if invitado is null then raise exception 'Registro cerrado: solo la administradora puede agregar personas'; end if;
+  end if;
   insert into perfiles (id, usuario, nombre, rol, activo, maestra)
   values (
     new.id,
@@ -436,13 +461,28 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- El cliente crea su reserva. p_para: 'hoy' o 'manana'
+-- Huella de la conexión de quien llama (IP mezclada con un secreto y el día, sin guardar la IP)
+alter table public.reservas add column if not exists origen text;
+create table if not exists public.secretos (clave text primary key, valor text not null);
+alter table public.secretos enable row level security;   -- sin políticas: nadie lo lee desde la app
+insert into public.secretos values ('huella', encode(gen_random_bytes(32), 'hex')) on conflict do nothing;
+create or replace function public.origen_peticion() returns text
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare h json; ip text;
+begin
+  begin h := current_setting('request.headers', true)::json; exception when others then return null; end;
+  ip := coalesce(h->>'cf-connecting-ip', nullif(trim(split_part(h->>'x-forwarded-for', ',', 1)), ''), h->>'x-real-ip');
+  if ip is null then return null; end if;
+  return encode(digest(ip || hoy_chile()::text || (select valor from secretos where clave = 'huella'), 'sha256'), 'hex');
+end $$;
+
 create or replace function public.crear_reserva(p_nombre text, p_telefono text, p_items jsonb, p_para text, p_nota text default '')
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   info jsonb := info_reservas();
   d date; k text; v jsonb; n int; total int := 0; det text := ''; limpio jsonb := '{}'::jsonb;
-  r reservas;
+  r reservas; o text := origen_peticion();
 begin
   p_nombre := trim(coalesce(p_nombre,'')); p_telefono := regexp_replace(coalesce(p_telefono,''), '[^0-9+]', '', 'g');
   if not (info->>'abiertas')::boolean then raise exception 'Las reservas están cerradas por ahora'; end if;
@@ -474,9 +514,16 @@ begin
   if (select count(*) from reservas where creado > now() - interval '10 minutes') >= 40 then
     raise exception 'Hay muchas reservas en este momento, intenta en unos minutos';
   end if;
-  insert into reservas (codigo, nombre, telefono, items, detalle, nota, dia)
+  -- y por conexión (se guarda solo una huella de la IP, no la IP) y por celular
+  if o is not null and (select count(*) from reservas where origen = o and creado > now() - interval '1 hour') >= 5 then
+    raise exception 'Ya hiciste varias reservas seguidas. Si necesitas más pan, habla directo con el almacén';
+  end if;
+  if p_telefono <> '' and (select count(*) from reservas where telefono = p_telefono and dia = d and estado = 'pendiente') >= 3 then
+    raise exception 'Ese celular ya tiene varias reservas para ese día. Si necesitas más pan, habla directo con el almacén';
+  end if;
+  insert into reservas (codigo, nombre, telefono, items, detalle, nota, dia, origen)
   values (upper(substr(encode(gen_random_bytes(3),'hex'),1,4)), p_nombre, p_telefono, limpio, det,
-          left(trim(coalesce(p_nota,'')), 200), d)
+          left(trim(coalesce(p_nota,'')), 200), d, o)
   returning * into r;
   return jsonb_build_object('id', r.id, 'codigo', r.codigo, 'dia', r.dia, 'detalle', r.detalle);
 end $$;
@@ -633,6 +680,8 @@ revoke execute on function public.registrar_cierre(integer, jsonb, text) from pu
 revoke execute on function public.restaurar_respaldo(jsonb) from public, anon;
 grant execute on function public.restaurar_respaldo(jsonb) to authenticated;
 revoke execute on function public.cambiar_acceso(uuid, text, text) from public, anon;
+revoke execute on function public.invitar(text), public.origen_peticion() from public, anon;
+grant execute on function public.invitar(text) to authenticated;
 grant execute on function public.cambiar_acceso(uuid, text, text) to authenticated;
 grant execute on function public.registrar_venta(jsonb, text, uuid, timestamptz), public.registrar_compra(text, jsonb, uuid),
   public.registrar_conteo(jsonb), public.revisar_vencimiento(uuid, boolean), public.resumen_caja(),
