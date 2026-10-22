@@ -174,6 +174,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const clp = n => "$" + Math.round(n).toLocaleString("es-CL");
 const uid = () => Math.random().toString(36).slice(2, 10);
+const uuid = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
 const SECTORS = ["Pan","Verduras","Bebidas","Jugos","Lácteos","Abarrotes","Legumbres","Galletas","Conservas","Snacks","Aseo"];
 
@@ -347,7 +348,7 @@ const ui = { view:"inicio", cart:[], medio:"efectivo", shop:{}, recv:{ supplier:
 
 const P = id => S.products.find(p => p.id === id);
 function stockOf(p){
-  if (isDB()) return p.stock;
+  if (isDB()) return p.stock == null ? null : r3(p.stock - pendingQty(p.id));
   if (p.countAt == null) return null;
   let s = p.countQty;
   for (const m of S.movs){ if (m.pid !== p.id || m.at <= p.countAt) continue;
@@ -403,11 +404,15 @@ const userEmail = u => { u = u.trim().toLowerCase(); return u.includes("@") ? u 
 function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("sin conexión")); document.head.appendChild(s); }); }
 // Estado de la conexión: internet del aparato, última consulta al servidor y canal en vivo
 const net = { fail:false, rt:"conectando" };
-const isNetErr = e => /Failed to fetch|NetworkError|Load failed|sin conexión|fetch failed/i.test((e && (e.message || e.details)) || "");
-function netState(){ if (!navigator.onLine || net.fail) return ["bad", "Sin internet"]; if (net.rt === "error") return ["warn", "Reconectando…"]; return ["", "En línea"]; }
+const isNetErr = e => /Failed to fetch|NetworkError|Load failed|sin conexión|fetch failed|AbortError|aborted|timed? ?out/i.test((e && (e.message || e.details)) || "");
+function netState(){
+  const n = outbox.list().length, por = n ? ` · ${n} por enviar` : "";
+  if (!navigator.onLine || net.fail) return ["bad", "Sin internet" + por];
+  if (n) return ["warn", `Enviando ${n}…`];
+  if (net.rt === "error") return ["warn", "Reconectando…"]; return ["", "En línea"]; }
 function netPill(){ if (!isDB()) return ""; const [k, t] = netState(); return `<span class="netpill ${k}" role="status"><i></i>${t}</span>`; }
 function setNet(){ if (!isDB()) return; const [k, t] = netState(); document.querySelectorAll(".netpill").forEach(el => { el.className = "netpill " + k; el.innerHTML = `<i></i>${t}`; }); }
-window.addEventListener("online", () => { setNet(); if (isDB()) reloadSoon(); });
+window.addEventListener("online", () => { setNet(); if (isDB()) flushOutbox().finally(reloadSoon); });
 window.addEventListener("offline", setNet);
 async function q(req){
   let res; try { res = await req; } catch(e){ if (isNetErr(e)){ net.fail = true; setNet(); } throw e; }
@@ -457,7 +462,8 @@ async function dbLoadAll(){
   S = { products: prods.map(r => { const o = prodFromRow(r), cur = prev.find(p => p.id === o.id); return cur ? Object.assign(cur, o) : o; }),
     movs: movs.map(movFromRow), clients: cs, reservas: res.map(resFromRow), panMsg: db.ajustes.mensaje_pan || "",
     proveedores: provs.map(provFromRow), ofertas: ofertas.map(ofeFromRow), cierres: cierres.map(cieFromRow), vencs: vencs.map(movFromRow) };
-  db.loadedAt = Date.now();
+  db.loadedAt = Date.now(); db.offline = false;
+  saveCopy(); applyPending();
 }
 async function loadVencs(){
   S.vencs = (await all(() => sb.from("movimientos").select("*").not("vence", "is", null).eq("vence_revisado", false).order("vence"))).map(movFromRow);
@@ -469,7 +475,7 @@ async function fetchProducts(ids){
 }
 // Trae los movimientos nuevos (los propios y los de otros celulares)
 async function syncMovs(){
-  const last = S.movs.reduce((a, m) => Math.max(a, m.at), Date.now() - 8*D);
+  const last = S.movs.reduce((a, m) => m.pending ? a : Math.max(a, m.at), Date.now() - 8*D);
   const rows = await all(() => sb.from("movimientos").select("*").gte("at", new Date(last - 60e3).toISOString()).order("at"));
   rows.forEach(r => { if (!S.movs.some(m => m.id === r.id)) S.movs.push(movFromRow(r)); });
   S.movs.sort((a, b) => a.at - b.at);
@@ -517,13 +523,82 @@ function dbSubscribe(){
     if (st === "SUBSCRIBED"){ if (db.joined) reloadSoon(); db.joined = true; } });
 }
 
+
+// ---------- Sin internet: ventas y fiados se guardan en el celular y se envían solos ----------
+// Cada venta lleva su propio número (grupo_id), así que si llega dos veces se guarda una sola.
+const OUTBOX_KEY = "almacen-por-enviar", COPY_KEY = "almacen-copia";
+const outbox = {
+  list(){ try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch(e){ return []; } },
+  set(l){ try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(l)); } catch(e){} },
+  add(it){ const l = this.list(); l.push(it); this.set(l); },
+  drop(id){ this.set(this.list().filter(x => x.id !== id)); }
+};
+const pendingQty = pid => outbox.list().reduce((a, it) => a + (it.kind === "venta" ? it.lines.filter(l => l.pid === pid).reduce((b, l) => b + l.qty, 0) : 0), 0);
+// Muestra lo que está por enviar como si ya estuviera guardado (historial, ventas del día, fiados)
+function applyPending(){
+  for (const it of outbox.list()){
+    if (it.kind === "venta") it.lines.forEach((l, i) => { const id = `${it.id}-${i}`;
+      if (!S.movs.some(m => m.id === id)) S.movs.push({ id, pid:l.pid, type:"venta", qty:l.qty, at:it.at, price:l.price, disc:l.disc, medio:it.medio, user:db.profile?.id, pending:true }); });
+    if (it.kind === "fiado"){ const c = S.clients.find(c => c.id === it.cliente);
+      if (c && !c.items.some(i => i.id === it.id)) c.items.push({ id:it.id, type:it.tipo, amount:it.monto, note:it.nota, at:it.at, medio:it.medio, user:db.profile?.id, pending:true }); }
+  }
+  S.movs.sort((a, b) => a.at - b.at);
+}
+// Un error que no se arregla reintentando (por ejemplo, un producto borrado): se aparta para no trabar a los demás
+const isFinalErr = e => !isNetErr(e) && (e?.code === "P0001" || /^2[23]/.test(e?.code || ""));
+function withTimeout(req, ms){ const c = new AbortController(); setTimeout(() => c.abort(), ms); return req.abortSignal(c.signal); }
+async function sendItem(it){
+  if (it.kind === "venta"){
+    const items = it.lines.map(l => ({ producto_id:l.pid, cantidad:l.qty, precio:l.price, descuento:l.disc }));
+    try { await q(withTimeout(sb.rpc("registrar_venta", { items, medio:it.medio, grupo_id:it.id, hora:new Date(it.at).toISOString() }), 10000)); }
+    catch(e){ if (e?.code !== "PGRST202") throw e;
+      // La base de datos todavía no tiene la versión nueva (falta ejecutar schema.sql): se usa la anterior
+      await q(withTimeout(sb.rpc("registrar_venta", { items, medio:it.medio }), 10000)); }
+    S.movs = S.movs.filter(m => !(m.pending && m.id.startsWith(it.id + "-")));
+    const rows = await q(sb.from("movimientos").select("*").eq("grupo", it.id));
+    rows.forEach(r => { if (!S.movs.some(m => m.id === r.id)) S.movs.push(movFromRow(r)); });
+    S.movs.sort((a, b) => a.at - b.at);
+    await fetchProducts(it.lines.map(l => l.pid)).catch(() => {});
+  } else {
+    await q(withTimeout(sb.from("fiados").upsert({ id:it.id, cliente_id:it.cliente, tipo:it.tipo, monto:it.monto, nota:it.nota, medio:it.medio, at:new Date(it.at).toISOString() },
+      { onConflict:"id", ignoreDuplicates:true }), 10000));
+    const c = S.clients.find(c => c.id === it.cliente), i = c?.items.find(i => i.id === it.id); if (i) delete i.pending;
+  }
+}
+let flushing = null;
+function flushOutbox(){
+  if (flushing) return flushing;
+  if (!isDB() || !outbox.list().length) return Promise.resolve(true);
+  flushing = (async () => {
+    let it;
+    while ((it = outbox.list()[0])){
+      if (!navigator.onLine){ net.fail = true; break; }
+      try { await sendItem(it); outbox.drop(it.id); }
+      catch(e){
+        if (!isFinalErr(e)) break;
+        outbox.drop(it.id); S.movs = S.movs.filter(m => !(m.pending && m.id.startsWith(it.id + "-")));
+        try { const f = JSON.parse(localStorage.getItem(OUTBOX_KEY + "-fallidas")) || []; f.push({ ...it, error:e.message }); localStorage.setItem(OUTBOX_KEY + "-fallidas", JSON.stringify(f)); } catch(x){}
+        toast(`No se pudo guardar ${it.kind === "venta" ? "una venta" : "un fiado"} hecho sin internet: ${friendly(e)}`);
+      }
+    }
+    return !outbox.list().length;
+  })().finally(() => { flushing = null; setNet(); softRender(); });
+  return flushing;
+}
+setInterval(() => { if (isDB() && outbox.list().length && navigator.onLine) flushOutbox().then(ok => ok && reloadSoon()); }, 20000);
+// Copia de los datos para poder abrir la app aunque no haya internet
+function saveCopy(){ try { localStorage.setItem(COPY_KEY, JSON.stringify({ uid:db.profile.id, at:Date.now(), profile:db.profile, team:db.team, panes:db.panes, ajustes:db.ajustes, S })); } catch(e){} }
+function loadCopy(uid){ try { const c = JSON.parse(localStorage.getItem(COPY_KEY)); return c && c.uid === uid ? c : null; } catch(e){ return null; } }
+
 // ---------- Acciones: cada cambio pasa por aquí, en modo demo o con base de datos ----------
 const act = {
   // lines: [{ pid, qty, price, disc }] ya con las ofertas aplicadas (ver cartLines)
   async sale(lines, medio){
     if (!isDB()){ const now = Date.now(); lines.forEach(l => S.movs.push({ id:uid(), pid:l.pid, type:"venta", qty:l.qty, at:now, price:l.price, disc:l.disc, medio })); save(); return; }
-    await q(sb.rpc("registrar_venta", { items: lines.map(l => ({ producto_id:l.pid, cantidad:l.qty, precio:l.price, descuento:l.disc })), medio }));
-    await Promise.all([syncMovs(), fetchProducts(lines.map(l => l.pid))]);
+    // Se guarda primero en el celular y después se envía: si no hay internet, queda por enviar
+    outbox.add({ id:uuid(), kind:"venta", at:Date.now(), medio, lines: lines.map(l => ({ pid:l.pid, qty:l.qty, price:l.price, disc:l.disc || 0 })) });
+    applyPending(); setNet();
+    return (await flushOutbox()) ? "enviada" : "pendiente";
   },
   async receive(supplier, items, provId){
     items = items.filter(l => l.qty > 0);
@@ -585,8 +660,9 @@ const act = {
   async clientMov(c, type, amount, note, medio){
     medio = type === "abono" ? medio || "efectivo" : null;
     if (!isDB()){ c.items.push({ id:uid(), type, amount, note, at:Date.now(), medio }); save(); return; }
-    const row = await q(sb.from("fiados").insert({ cliente_id:c.id, tipo:type, monto:amount, nota:note, medio }).select().single());
-    if (!c.items.some(i => i.id === row.id)) c.items.push(fiaFromRow(row));
+    outbox.add({ id:uuid(), kind:"fiado", at:Date.now(), cliente:c.id, tipo:type, monto:amount, nota:note || "", medio });
+    applyPending(); setNet();
+    return (await flushOutbox()) ? "enviada" : "pendiente";
   },
   async setting(clave, valor){
     if (!isDB()) return;
@@ -1147,7 +1223,7 @@ function openProductForm(sector, code, cb){
 function movRow(m){
   const p = P(m.pid); const nm = p ? esc(p.name) : "Producto";
   const who = isDB() && userName(m.user) ? " · " + esc(userName(m.user)) : "";
-  if (m.type === "venta") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Venta · ${ago(m.at)}${m.medio && ext("caja") ? " · " + medioName(m.medio) : ""}${m.disc ? " · oferta −" + clp(m.disc) : ""}${who}</div></div><span class="diff" style="color:var(--bad)">−${fq(m.qty, p)}</span></div>`;
+  if (m.type === "venta") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">${m.pending ? `<span class="pill warn">Por enviar</span> ` : ""}Venta · ${ago(m.at)}${m.medio && ext("caja") ? " · " + medioName(m.medio) : ""}${m.disc ? " · oferta −" + clp(m.disc) : ""}${who}</div></div><span class="diff" style="color:var(--bad)">−${fq(m.qty, p)}</span></div>`;
   if (m.type === "compra") return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Compra${m.supplier?" a "+esc(m.supplier):""} · ${ago(m.at)}${m.vence ? " · vence " + fmtDia(m.vence) : ""}${who}</div></div><span class="diff" style="color:var(--ok)">+${fq(m.qty, p)}</span></div>`;
   const d = m.expected != null && m.expected !== m.qty ? ` · esperaba ${fq(m.expected, p)}` : "";
   return `<div class="item"><div class="main"><div class="name">${nm}</div><div class="sub">Conteo${d} · ${ago(m.at)}${who}</div></div><span class="pill ok">= ${fq(m.qty, p)}</span></div>`;
@@ -1200,11 +1276,12 @@ function openCliente(c){
     </div>
     ${ext("caja") ? `<div class="field"><label for="fmed">Si es un pago, ¿cómo pagó?</label><select class="input" id="fmed">${MEDIOS.map(([k,n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>` : ""}
     <div class="grid2"><button class="btn primary" id="addFiado">Anotar fiado</button><button class="btn" id="addAbono">Registrar pago</button></div>
-    <div><h3>Movimientos</h3><div class="list">${items.map(i => `<div class="item"><div class="main"><div class="name">${i.type === "fiado" ? esc(i.note || "Fiado") : "Pago"}</div><div class="sub">${ago(i.at)}${i.type === "abono" && i.medio && ext("caja") ? " · " + medioName(i.medio) : ""}</div></div>
+    <div><h3>Movimientos</h3><div class="list">${items.map(i => `<div class="item"><div class="main"><div class="name">${i.type === "fiado" ? esc(i.note || "Fiado") : "Pago"}</div><div class="sub">${i.pending ? `<span class="pill warn">Por enviar</span> ` : ""}${ago(i.at)}${i.type === "abono" && i.medio && ext("caja") ? " · " + medioName(i.medio) : ""}</div></div>
       <span class="diff" style="color:${i.type === "fiado" ? "var(--bad)" : "var(--ok)"}">${i.type === "fiado" ? "+" : "−"}${clp(i.amount)}</span></div>`).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
   const add = type => run(async () => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
-    await act.clientMov(c, type, a, $("#fn").value.trim(), $("#fmed")?.value); toast(type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`); render(); openCliente(c); });
+    const r = await act.clientMov(c, type, a, $("#fn").value.trim(), $("#fmed")?.value);
+    toast((type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`) + (r === "pendiente" ? ". Se enviará cuando vuelva internet." : "")); render(); openCliente(c); });
   $("#addFiado").onclick = () => add("fiado");
   $("#addAbono").onclick = () => add("abono");
 }
@@ -1894,7 +1971,9 @@ function render(){
     $("#rlim").onchange = e => run(async () => { await act.setting("reservas_hora_limite", +e.target.value); toast("Hora guardada"); });
   }
   if (v === "equipo"){
-    $("#logout").onclick = () => run(async () => { await sb.auth.signOut(); location.reload(); });
+    $("#logout").onclick = () => run(async () => {
+      if (outbox.list().length && !confirm("Hay ventas guardadas en este celular que todavía no se envían. Si sales ahora se enviarán cuando alguien vuelva a entrar en este celular. ¿Salir igual?")) return;
+      await sb.auth.signOut(); try { localStorage.removeItem(COPY_KEY); } catch(e){} location.reload(); });
     $("#mypass").onclick = openMyPass;
     if (isAdmin()){
       $("#addu").onclick = openNuevaPersona;
@@ -1927,8 +2006,9 @@ function render(){
       $("#vuelto").textContent = ui.paga ? (ui.paga < t ? "Falta " + clp(t - ui.paga) : clp(ui.paga - t)) : "—"; };
     $("#confirm").onclick = () => run(async () => { const lines = cartLines(), t = lines.reduce((a,l) => a + lineTotal(l), 0);
       $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
-      await act.sale(lines, ext("caja") ? ui.medio : "efectivo").finally(render);
-      ui.cart = []; ui.paga = 0; ui.medio = "efectivo"; render(); toast(`Venta registrada: ${clp(t)}`); });
+      const r = await act.sale(lines, ext("caja") ? ui.medio : "efectivo").finally(render);
+      ui.cart = []; ui.paga = 0; ui.medio = "efectivo"; render();
+      toast(r === "pendiente" ? `Venta guardada en el celular: ${clp(t)}. Se enviará sola cuando vuelva internet.` : `Venta registrada: ${clp(t)}`); });
   }
   if (v === "recibir"){
     bindSearch(addToRecv);
@@ -1995,8 +2075,10 @@ async function boot(){
   catch(e){ return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>Sin conexión</h2><p style="margin:0">No se pudo conectar con la base de datos de la tienda. Revisa el internet e intenta de nuevo.</p><button class="btn primary block" onclick="location.reload()">Reintentar</button></div>${demoLink}</div>`); }
   sb = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth:{ storageKey:"almacen-sesion" } });
   sb.auth.onAuthStateChange(ev => { if (ev === "SIGNED_OUT" && MODE) location.reload(); });
-  const { data } = await sb.auth.getSession();
+  const { data, error } = await sb.auth.getSession();
   if (data.session) return enterDB(data.session.user);
+  // Sin internet la sesión vencida no se puede renovar: si hay una copia de este celular, se abre con ella
+  if (error && isNetErr(error)){ try { const st = JSON.parse(localStorage.getItem("almacen-sesion")); const u = st?.user || st?.currentSession?.user; if (u && loadCopy(u.id)) return enterDB(u); } catch(e){} }
   showLogin();
 }
 
@@ -2049,11 +2131,18 @@ async function enterDB(user){
     db.profile = prof;
     await dbLoadAll();
   } catch(e){
+    const copy = isNetErr(e) && loadCopy(user.id);
+    if (copy){
+      Object.assign(db, { profile:copy.profile, team:copy.team, panes:copy.panes, ajustes:copy.ajustes, loadedAt:copy.at, offline:true, joined:true });
+      S = copy.S; applyPending(); net.fail = true;
+      MODE = "db"; $("nav.tabs").hidden = false; ui.recv = { supplier:"", provId:null, items:[] };
+      dbSubscribe(); render(); return toast("Sin internet: se abrió con los datos guardados en este celular");
+    }
     return gate(`${gateHead()}<div class="stack"><div class="card stack"><h2>No se pudieron cargar los datos</h2><p style="margin:0">${esc(friendly(e))}</p>
       <button class="btn primary block" onclick="location.reload()">Reintentar</button></div></div>`);
   }
   MODE = "db"; $("nav.tabs").hidden = false; ui.recv = { supplier:"", provId:null, items:[] };
-  dbSubscribe(); render();
+  dbSubscribe(); render(); flushOutbox();
 }
 // Al volver a la app después de un rato (celular bloqueado), se trae lo que cambió
 document.addEventListener("visibilitychange", () => { if (isDB() && !document.hidden && Date.now() - db.loadedAt > 60e3) reloadSoon(); });

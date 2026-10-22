@@ -81,6 +81,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Extensiones** si la tienda no los usa.
 - **Se instala como app** (PWA) en el celular o computador, con su ícono, desde **Más > Instalar la app**.
 - **Indicador de conexión** en la tienda: En línea, Reconectando… o Sin internet.
+- **Sin internet:** las ventas y los fiados se guardan en el celular y se envían solos al volver la conexión, sin duplicarse.
 - **Respaldo:** descargar todo en un archivo y **restaurarlo** después (solo agrega lo que falta, no borra nada).
 - Datos ficticios de ejemplo y botón **"Reiniciar demo"**.
 
@@ -156,7 +157,6 @@ Dentro de `index.html` el código se organiza en bloques:
 
 ## Próximos pasos
 
-- Seguir vendiendo cuando se corta internet y sincronizar al volver.
 - Reportes de ventas y ganancia por día, semana y mes.
 - Anular una venta mal registrada (hoy los movimientos no se editan).
 
