@@ -1,0 +1,25 @@
+# Respaldo automático diario de la tienda, enviado por Gmail.
+# Configuración (una vez): ver docs/RESPALDO.md
+name: Respaldo diario
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # todos los días ~01:30 en Chile (04:30 UTC)
+  workflow_dispatch:        # botón "Run workflow" para probarlo a mano
+
+permissions:
+  contents: read
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enviar respaldo por correo
+        run: python3 scripts/respaldo.py
+        env:
+          RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
+          GMAIL_USUARIO: ${{ secrets.GMAIL_USUARIO }}
+          GMAIL_CLAVE_APP: ${{ secrets.GMAIL_CLAVE_APP }}
+          RESPALDO_PARA: ${{ secrets.RESPALDO_PARA }}

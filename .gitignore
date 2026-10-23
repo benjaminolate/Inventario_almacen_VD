@@ -18,6 +18,7 @@ respaldos/
 backups/
 *.sql
 !supabase/schema.sql
+!supabase/catalogo_emporio.sql
 *.sqlite
 *.db
 *.csv
