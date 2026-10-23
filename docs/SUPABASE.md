@@ -85,7 +85,7 @@ La misma página sirve de demo pública y de sistema de la tienda. La dirección
 | Cambiar usuario o contraseña de otra persona | Sí (menos la cuenta maestra) | No |
 | Nombre de la tienda, página de la tienda | Sí | No |
 | Restaurar un respaldo | Sí | No |
-| Proveedores, ofertas, cierre de caja | Sí | Sí |
+| Proveedores, costos, ofertas, cierre de caja | Sí | Sí |
 | Encender o apagar extensiones | Sí | No |
 
 Las ventas, compras y conteos quedan registrados con la hora del servidor y la persona que los hizo, y no se pueden editar ni borrar desde la app.

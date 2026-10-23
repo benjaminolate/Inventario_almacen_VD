@@ -176,6 +176,10 @@ const clp = n => "$" + Math.round(n).toLocaleString("es-CL");
 const uid = () => Math.random().toString(36).slice(2, 10);
 const uuid = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
+// Demo: unidades por caja típicas de las distribuidoras
+const DEMO_CAJA = { "Coca-Cola 1,5 L":6, "Coca-Cola 3 L":6, "Coca-Cola Zero 1,5 L":6, "Sprite 1,5 L":6, "Fanta 1,5 L":6, "Pepsi 1,5 L":6, "Agua mineral sin gas 1,6 L":6,
+  "Jugo en caja naranja 1 L":12, "Néctar individual 200 ml":24, "Leche entera 1 L":12, "Leche descremada 1 L":12, "Yogur batido 125 g":24, "Arroz grado 2, 1 kg":10,
+  "Fideos espirales 400 g":20, "Fideos spaghetti 400 g":20, "Azúcar 1 kg":10, "Aceite maravilla 1 L":12 };
 const SECTORS = ["Pan","Verduras","Bebidas","Jugos","Lácteos","Abarrotes","Legumbres","Galletas","Conservas","Snacks","Aseo"];
 
 // Catálogo precargado típico de almacén: [nombre, sector, precio venta, costo, popularidad 0-3, unidad, botón rápido, se reserva]
@@ -284,7 +288,8 @@ function seedV3(st){
   st.movs.sort((a,b) => a.at - b.at);
   st.ofertas = [ { id:"o1", pid:byName("Galletas rellenas chocolate").id, qty:3, price:1500, active:true },
                  { id:"o2", pid:byName("Coca-Cola 1,5 L").id, qty:2, price:3500, active:true } ];
-  st.cierres = []; st.ext = {}; st.v3 = st.v4 = st.v5 = true;
+  st.cierres = []; st.ext = {}; st.v3 = st.v4 = st.v5 = st.v6 = true;
+  st.products.forEach(p => { if (DEMO_CAJA[p.name]) p.porCaja = DEMO_CAJA[p.name]; });
   st.pagina = demoPagina();
   return st;
 }
@@ -338,6 +343,7 @@ function load(){ try { const raw = localStorage.getItem(KEY); if (raw) { S = JSO
       barcode:"", min:c[1] === "Pan" ? 10 : c[5] === "kg" ? 2 : 3, unit:c[5] || "un", atajo:!!c[6], reserva:!!c[7], has:true, countQty:null, countAt:null, estimated:false, provId:"v3" }); });
     S.v4 = true; save(); }
   // El pan pasó de kilo a unidad
+  if (!S.v6){ S.products.forEach(p => { if (DEMO_CAJA[p.name] && !p.porCaja) p.porCaja = DEMO_CAJA[p.name]; }); S.v6 = true; save(); }
   if (!S.v5){ S.products.filter(p => p.cat === "Pan").forEach(p => { const c = CATALOG.find(c => c[0] === p.name); if (!c || p.unit !== "kg") return;
       Object.assign(p, { unit:"un", price:c[2], cost:c[3], min:10, atajo:!!c[6], reserva:!!c[7], countQty:null, countAt:null }); });
     S.movs = S.movs.filter(m => !(P(m.pid)?.cat === "Pan" && m.qty % 1)); S.v5 = true; save(); }
@@ -388,7 +394,7 @@ const db = { profile:null, team:{}, panes:[], ajustes:{}, channel:null, loadedAt
 const iso = t => t ? Date.parse(t) : null;
 const prodFromRow = r => ({ id:r.id, name:r.nombre, cat:r.sector, price:r.precio, cost:r.costo, min:r.minimo, barcode:r.codigo || "",
   has:r.tiene, countQty:r.conteo_cant == null ? null : +r.conteo_cant, countAt:iso(r.conteo_at), estimated:r.aproximado, stock:r.stock == null ? null : +r.stock, pend:+r.ventas_sin_contar || 0, pop:0, provId:r.proveedor_id,
-  unit:r.unidad || "un", atajo:!!r.atajo });
+  unit:r.unidad || "un", atajo:!!r.atajo, porCaja:r.por_caja || null });
 const movFromRow = r => ({ id:r.id, pid:r.producto_id, type:r.tipo, qty:+r.cantidad, price:r.precio, cost:r.costo, supplier:r.proveedor, expected:r.esperado == null ? null : +r.esperado, at:iso(r.at), user:r.usuario_id,
   disc:r.descuento || 0, medio:r.medio, vence:r.vence, venceOk:r.vence_revisado });
 const provFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono || "", note:r.nota || "" });
@@ -601,11 +607,12 @@ const act = {
     applyPending(); setNet();
     return (await flushOutbox()) ? "enviada" : "pendiente";
   },
+  // Cada línea puede venir por caja: { box:true, n:12, qty:2 cajas, cost:precio de la caja } y se guarda por unidad
   async receive(supplier, items, provId){
-    items = items.filter(l => l.qty > 0);
-    if (!isDB()){ const now = Date.now(); items.forEach(l => { const p = P(l.pid); p.cost = l.cost; p.has = true; if (provId) p.provId = provId;
+    items = items.filter(l => l.qty > 0).map(l => l.box && l.n > 1 ? { ...l, qty:l.qty * l.n, cost:Math.round(l.cost / l.n), porCaja:l.n } : l);
+    if (!isDB()){ const now = Date.now(); items.forEach(l => { const p = P(l.pid); p.cost = l.cost; p.has = true; if (provId) p.provId = provId; if (l.porCaja) p.porCaja = l.porCaja;
       S.movs.push({ id:uid(), pid:l.pid, type:"compra", qty:l.qty, at:now, cost:l.cost, supplier, vence:l.vence || null }); }); save(); return; }
-    await q(sb.rpc("registrar_compra", { proveedor:supplier, proveedor_id:provId || null, items: items.map(l => ({ producto_id:l.pid, cantidad:l.qty, costo:l.cost, vence:l.vence || "" })) }));
+    await q(sb.rpc("registrar_compra", { proveedor:supplier, proveedor_id:provId || null, items: items.map(l => ({ producto_id:l.pid, cantidad:l.qty, costo:l.cost, vence:l.vence || "", por_caja:l.porCaja || null })) }));
     await Promise.all([syncMovs(), fetchProducts(items.map(l => l.pid)), items.some(l => l.vence) ? loadVencs() : null]);
   },
   // draft: { pid: { qty, est, none } }. Devuelve cuántos se contaron y las diferencias
@@ -636,8 +643,8 @@ const act = {
   },
   async updateProduct(p, f){
     if (!isDB()){ Object.assign(p, f); save(); return p; }
-    const map = { name:"nombre", price:"precio", cost:"costo", min:"minimo", barcode:"codigo", provId:"proveedor_id", unit:"unidad", atajo:"atajo", has:"tiene" }, cols = { actualizado:new Date().toISOString() };
-    for (const k in f) if (map[k]) cols[map[k]] = k === "barcode" || k === "provId" ? (f[k] || null) : f[k];
+    const map = { name:"nombre", price:"precio", cost:"costo", min:"minimo", barcode:"codigo", provId:"proveedor_id", unit:"unidad", atajo:"atajo", has:"tiene", porCaja:"por_caja" }, cols = { actualizado:new Date().toISOString() };
+    for (const k in f) if (map[k]) cols[map[k]] = k === "barcode" || k === "provId" || k === "porCaja" ? (f[k] || null) : f[k];
     await q(sb.from("productos").update(cols).eq("id", p.id));
     await fetchProducts([p.id]); return P(p.id);
   },
@@ -955,6 +962,7 @@ const ICONS = {
   proveedores:'<svg viewBox="0 0 24 24"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>',
   vencimientos:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M12 13v3M12 18.5v.01"/></svg>',
   ofertas:'<svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.4"/></svg>',
+  costos:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M14.8 9.2c-.5-.9-1.5-1.4-2.8-1.4-1.6 0-2.8.8-2.8 2.1 0 2.9 5.8 1.4 5.8 4.2 0 1.3-1.2 2.1-3 2.1-1.4 0-2.5-.6-3-1.6M12 6v1.8M12 16.2V18"/></svg>',
   caja:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
   pagina:'<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
   respaldo:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>',
@@ -963,7 +971,7 @@ const ICONS = {
   ajustes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>'
 };
 const LABELS = { inicio:"Inicio", vender:"Vender", contar:"Contar", productos:"Productos", fiados:"Fiados", mas:"Más" };
-const IN_MAS = ["pagina","respaldo","instalar","mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
+const IN_MAS = ["costos","pagina","respaldo","instalar","mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
 function renderTabs(){
   const keys = Object.keys(LABELS).filter(k => k !== "fiados" || ext("fiados"));
   $("#tabs").style.gridTemplateColumns = `repeat(${keys.length},1fr)`;
@@ -1091,7 +1099,7 @@ function openGranel(p, idx){
 }
 
 function viewRecibir(){
-  const total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos");
+  const total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos"), anyBox = ui.recv.items.some(l => l.box);
   return `${backMasHtml()}${header("Recibir mercadería", "Lo que llega del proveedor").replace(netPill(), "")}
   <div class="stack">
     <div class="field"><label for="sup">Proveedor o distribuidora</label>
@@ -1104,10 +1112,11 @@ function viewRecibir(){
     <div class="card">
       <h3>Productos recibidos</h3>
       ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:1fr 80px 96px"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
-        <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="Cantidad">
-        <input class="input" type="number" min="0" inputmode="numeric" value="${l.cost}" data-rc="${i}" aria-label="Costo unitario">
+        <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
+        <input class="input" type="number" min="0" inputmode="numeric" value="${l.cost}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">
+        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : "unidades"}</span></div>`}
         ${venc ? `<div class="opts"><label for="rv${i}">Vence</label><input class="input" style="width:auto;font-size:14px;font-weight:500;padding:6px 8px" type="date" id="rv${i}" value="${esc(l.vence || "")}" data-rv="${i}"><span class="muted">opcional</span></div>` : ""}</div>`; }).join("") +
-        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>cantidad</span><span>costo c/u</span></div>`
+        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span><span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span></div>`
         : `<div class="empty">Agrega los productos de la factura. Ejemplo: 2 cajas de Coca-Cola 1,5 L = 24 unidades.</div>`}
       <div class="spread" style="padding-top:12px"><span class="muted">Total factura</span><span class="total">${clp(total)}</span></div>
     </div>
@@ -1115,7 +1124,11 @@ function viewRecibir(){
     <button class="btn primary block" id="confirm" ${ui.recv.items.length?"":"disabled"}>Guardar recepción</button>
   </div>`;
 }
-function addToRecv(p){ const l = ui.recv.items.find(l => l.pid === p.id); if (l) l.qty++; else ui.recv.items.push({ pid:p.id, qty:isKg(p) ? 5 : 12, cost:p.cost }); render(); }
+function addToRecv(p){ const l = ui.recv.items.find(l => l.pid === p.id); if (l) l.qty++;
+  else if (p.porCaja && !isKg(p)) ui.recv.items.push({ pid:p.id, box:true, n:p.porCaja, qty:1, cost:p.cost * p.porCaja });
+  else ui.recv.items.push({ pid:p.id, qty:isKg(p) ? 5 : 12, cost:p.cost, n:12 });
+  render(); }
+const recvUnits = l => l.box && l.n > 1 ? l.qty * l.n : l.qty;
 
 function viewContar(){
   if (!ui.sector){
@@ -1181,6 +1194,7 @@ function openProduct(p){
       <div class="field"><label for="eb">Código de barras</label><input class="input code" id="eb" value="${esc(p.barcode)}" placeholder="Sin código"></div>
     </div>
     <div class="field"><label for="en">Nombre</label><input class="input" id="en" value="${esc(p.name)}"></div>
+    ${isKg(p) ? "" : `<div class="field"><label for="ebx">Unidades por caja del proveedor</label><input class="input" id="ebx" type="number" min="2" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12 (opcional)"></div>`}
     ${ext("proveedores") ? `<div class="field"><label for="ev">Proveedor</label><select class="input" id="ev"><option value="">Sin proveedor</option>${(S.proveedores || []).map(v => `<option value="${v.id}" ${v.id === p.provId ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select></div>` : ""}
     <div class="field"><label for="eu">Se vende</label><select class="input" id="eu"><option value="un" ${!isKg(p) ? "selected" : ""}>Por unidad</option><option value="kg" ${isKg(p) ? "selected" : ""}>A granel, por kilo (precio por kg)</option></select></div>
     <label class="row"><input type="checkbox" id="eq" ${p.atajo ? "checked" : ""}> Botón rápido en Vender</label>
@@ -1191,6 +1205,7 @@ function openProduct(p){
   $("#esave").onclick = () => run(async () => {
     const f = { price:+$("#ep").value||0, cost:+$("#ec").value||0, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name };
     if ($("#ev")) f.provId = $("#ev").value || null;
+    if ($("#ebx")) f.porCaja = +$("#ebx").value >= 2 ? Math.round(+$("#ebx").value) : null;
     f.unit = $("#eu").value; f.atajo = $("#eq").checked;
     await act.updateProduct(p, f);
     closeModal(); toast("Producto actualizado"); render(); });
@@ -1682,10 +1697,59 @@ function openProv(v){
     <div class="field"><label for="vp">Celular o teléfono</label><input class="input" id="vp" inputmode="tel" value="${esc(v?.phone || "")}" placeholder="9 XXXX XXXX"></div>
     <div class="field"><label for="vo">Nota</label><input class="input" id="vo" value="${esc(v?.note || "")}" placeholder="Ej: pasa los martes, pedido mínimo $50.000"></div>
     <button class="btn primary block" id="vsave">Guardar</button>
+    ${v && prods.length ? `<button class="btn block" id="vcost">Ver lo que cuesta cada producto</button>` : ""}
     ${v ? `<div><h3>Sus productos (${prods.length})</h3><p class="small muted" style="margin:4px 0 0">${prods.length ? esc(prods.map(p => p.name).join(", ")) : "Ninguno todavía. Se asigna en cada producto o al recibir mercadería de este proveedor."}</p></div>` : ""}
   </div>`);
+  if ($("#vcost")) $("#vcost").onclick = () => { closeModal(); ui.costProv = v.id; go("costos"); };
   $("#vsave").onclick = () => run(async () => { const name = $("#vn").value.trim(); if (!name) return $("#vn").focus();
     await act.saveProv(v, { name, phone:$("#vp").value.trim(), note:$("#vo").value.trim() }); closeModal(); render(); toast("Proveedor guardado"); });
+}
+
+// ---------- Costos por proveedor: cuánto cuesta cada producto por unidad y por caja ----------
+function viewCostos(){
+  const provs = ext("proveedores") ? (S.proveedores || []).slice().sort((a,b) => a.name.localeCompare(b.name)) : [];
+  const f = ui.costProv || "todos", ps = S.products.filter(p => p.has || p.provId).sort((a,b) => a.name.localeCompare(b.name));
+  const groups = (provs.length ? [...provs.map(v => [v.id, v.name]), ["", "Sin proveedor"]] : [["*", "Todos los productos"]])
+    .filter(([id]) => f === "todos" || id === f)
+    .map(([id, name]) => [id, name, ps.filter(p => id === "*" || (p.provId || "") === id)]).filter(g => g[2].length);
+  const row = p => { const m = p.price - p.cost, pct = p.price ? Math.round(m / p.price * 100) : 0, u = isKg(p) ? "kg" : "c/u";
+    return `<button class="item tap" data-cost="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div>
+      <div class="sub">Costo ${clp(p.cost)} ${u}${p.porCaja && !isKg(p) ? ` · caja de ${p.porCaja}: <b>${clp(p.cost * p.porCaja)}</b>` : isKg(p) ? "" : " · caja sin dato"}</div>
+      <div class="sub">Venta ${clp(p.price)} ${u} · ganas ${clp(m)} ${u}</div></div>
+      <span class="pill ${pct < 10 ? "bad" : pct < 20 ? "warn" : "ok"}">${pct}%</span></button>`; };
+  return `${backMasHtml()}
+  <div class="stack">
+    <div><h2>${provs.length ? "Costos por proveedor" : "Costos y ganancia"}</h2><p class="small muted" style="margin:4px 0 0">Lo que le cuesta a la tienda cada producto, por unidad y por caja, y cuánto se gana al venderlo. El costo se actualiza solo al recibir mercadería.</p></div>
+    ${provs.length ? `<div class="chips" style="flex-wrap:wrap"><button class="chip" data-cprov="todos" aria-pressed="${f === "todos"}">Todos</button>${provs.map(v => `<button class="chip" data-cprov="${v.id}" aria-pressed="${f === v.id}">${esc(v.name)}</button>`).join("")}<button class="chip" data-cprov="" aria-pressed="${f === ""}">Sin proveedor</button></div>` : ""}
+    ${groups.map(([id, name, list]) => {
+      return `<div class="card" style="padding-bottom:4px"><div class="spread"><h3>${esc(name)}</h3><span class="small muted">${list.length} ${list.length === 1 ? "producto" : "productos"}</span></div>
+      <div class="list">${list.map(row).join("")}</div></div>`; }).join("") || `<div class="card empty">No hay productos de este proveedor todavía. Se asignan en cada producto o al recibir mercadería.</div>`}
+    <p class="small muted" style="margin:0">El porcentaje es la ganancia sobre el precio de venta: <span class="pill ok">20% o más</span> <span class="pill warn">10 a 19%</span> <span class="pill bad">menos de 10%</span></p>
+  </div>`;
+}
+function openCosto(p){
+  const kg = isKg(p);
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(p.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <div class="grid2">
+      <div class="field"><label for="cu">Costo ${kg ? "por kg" : "por unidad"}</label><input class="input" id="cu" type="number" min="0" inputmode="numeric" value="${p.cost}"></div>
+      <div class="field"><label for="cv">Precio de venta</label><input class="input" id="cv" type="number" min="0" inputmode="numeric" value="${p.price}"></div>
+      ${kg ? "" : `<div class="field"><label for="cn">Unidades por caja</label><input class="input" id="cn" type="number" min="2" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12"></div>
+      <div class="field"><label for="cc">Costo de la caja</label><input class="input" id="cc" type="number" min="0" inputmode="numeric" value="${p.porCaja ? p.cost * p.porCaja : ""}" placeholder="Opcional"></div>`}
+    </div>
+    <div class="formula" id="cres"></div>
+    <button class="btn primary block" id="csave">Guardar</button>
+    <p class="small muted" style="margin:0">Si escribes el costo de la caja, el costo por unidad se calcula solo (y al revés).</p>
+  </div>`);
+  const upd = src => { const n = +($("#cn")?.value) || 0;
+    if (src === "cc" && n >= 2) $("#cu").value = Math.round((+$("#cc").value || 0) / n);
+    if ((src === "cu" || src === "cn") && n >= 2 && $("#cc")) $("#cc").value = (+$("#cu").value || 0) * n;
+    const c = +$("#cu").value || 0, v = +$("#cv").value || 0, m = v - c;
+    $("#cres").innerHTML = `Ganas <b>${clp(m)}</b> ${kg ? "por kg" : "por unidad"} (${v ? Math.round(m / v * 100) : 0}% del precio)${n >= 2 && !kg ? ` · <b>${clp(m * n)}</b> por caja vendida completa` : ""}`; };
+  ["cu","cv","cn","cc"].forEach(id => { const el = $("#" + id); if (el) el.oninput = () => upd(id); }); upd();
+  $("#csave").onclick = () => run(async () => { const n = +($("#cn")?.value) || 0;
+    await act.updateProduct(p, { cost:Math.max(0, Math.round(+$("#cu").value || 0)), price:Math.max(0, Math.round(+$("#cv").value || 0)), ...(kg ? {} : { porCaja:n >= 2 ? Math.round(n) : null }) });
+    closeModal(); render(); toast("Costo guardado"); });
 }
 
 // ---------- Vencimientos ----------
@@ -1860,10 +1924,12 @@ function viewMas(){
   const nPan = panes().length;
   return `${header("Más", "Otras herramientas")}
   <div class="stack">
-    ${sec("Logística", [
-      opt("recibir","recibir","Recibir mercadería","Registrar lo que llega del proveedor"),
-      ext("proveedores") ? opt("compras","compras","Lista de compras", low ? `${low} ${low === 1 ? "producto" : "productos"} bajo el mínimo` : "Nada bajo el mínimo") : "",
+    ${sec("Proveedores", [
+      opt("recibir","recibir","Recibir mercadería","Registrar lo que llega, por unidad o por caja"),
       ext("proveedores") ? opt("proveedores","proveedores","Proveedores", `${(S.proveedores || []).length} ${(S.proveedores || []).length === 1 ? "guardado" : "guardados"} · contacto y productos de cada uno`) : "",
+      opt("costos","costos", ext("proveedores") ? "Costos por proveedor" : "Costos y ganancia","Cuánto cuesta cada producto por unidad y por caja"),
+      ext("proveedores") ? opt("compras","compras","Lista de compras", low ? `${low} ${low === 1 ? "producto" : "productos"} bajo el mínimo` : "Nada bajo el mínimo") : ""])}
+    ${sec("Logística", [
       ext("vencimientos") ? opt("vencimientos","vencimientos","Vencimientos", venc ? `${venc} vencen esta semana o ya vencieron` : "Nada por vencer esta semana") : "",
       ext("ofertas") ? opt("ofertas","ofertas","Ofertas y packs", `${nOfe} ${nOfe === 1 ? "oferta activa" : "ofertas activas"}`) : "",
       ext("caja") ? opt("caja","caja","Cierre de caja","Cuadrar efectivo, débito y transferencia") : "",
@@ -1899,7 +1965,7 @@ function render(){
   renderTabs();
   const v = ui.view, app = $("#app");
   app.innerHTML = ({ inicio:viewInicio, vender:viewVender, recibir:viewRecibir, contar:viewContar, productos:viewProductos, historial:viewHistorial, fiados:viewFiados, mas:viewMas,
-    reservas: isDB() ? viewReservasDB : viewReservas, equipo:viewEquipo, compras:viewCompras, proveedores:viewProveedores, vencimientos:viewVencimientos,
+    reservas: isDB() ? viewReservasDB : viewReservas, equipo:viewEquipo, compras:viewCompras, proveedores:viewProveedores, costos:viewCostos, vencimientos:viewVencimientos,
     ofertas:viewOfertas, caja:viewCaja, extensiones:viewExtensiones, apariencia:viewApariencia, tiposdepan:viewTiposPan,
     pagina:viewPagina, respaldo:viewRespaldo, instalar:viewInstalar })[v]();
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -1912,6 +1978,10 @@ function render(){
     app.querySelectorAll("[data-srecv]").forEach(b => b.onclick = () => { const g = gs[b.dataset.srecv];
       ui.recv = { supplier: g.v ? g.v.name : "", provId: g.v?.id || null, items: g.items.filter(i => i.q > 0).map(i => ({ pid:i.p.id, qty:i.q, cost:i.p.cost })) };
       go("recibir"); toast("Revisa cantidades y costos de la factura y guarda"); });
+  }
+  if (v === "costos"){
+    app.querySelectorAll("[data-cprov]").forEach(b => b.onclick = () => { ui.costProv = b.dataset.cprov; render(); });
+    app.querySelectorAll("[data-cost]").forEach(b => b.onclick = () => openCosto(P(b.dataset.cost)));
   }
   if (v === "proveedores"){
     $("#addv").onclick = () => openProv(null);
@@ -2024,7 +2094,13 @@ function render(){
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
-    $("#confirm").onclick = () => run(async () => { const n = ui.recv.items.reduce((a,l) => a + (l.qty||0), 0);
+    app.querySelectorAll("[data-rbox]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rbox], n = Math.max(2, l.n || 12);
+      // Al cambiar entre unidades y cajas se convierten la cantidad y el costo
+      if (i.checked){ l.box = true; l.n = n; l.qty = Math.max(1, Math.round(l.qty / n)); l.cost = l.cost * n; }
+      else { l.box = false; l.qty = l.qty * n; l.cost = Math.round(l.cost / n); }
+      render(); });
+    app.querySelectorAll("[data-rn]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rn]; l.n = Math.max(2, Math.round(+i.value || 2)); render(); });
+    $("#confirm").onclick = () => run(async () => { const n = ui.recv.items.reduce((a,l) => a + (recvUnits(l)||0), 0);
       $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
       // Un proveedor nuevo escrito a mano queda guardado en la lista
       if (ext("proveedores") && !ui.recv.provId && ui.recv.supplier.trim()) ui.recv.provId = (await act.saveProv(null, { name:ui.recv.supplier.trim(), phone:"", note:"" })).id;

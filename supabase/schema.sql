@@ -223,6 +223,7 @@ alter table public.movimientos alter column esperado    type numeric(12,3);
 alter table public.productos   alter column conteo_cant type numeric(12,3);
 alter table public.productos   add column if not exists unidad text not null default 'un' check (unidad in ('un','kg'));  -- kg = a granel, precio por kilo
 alter table public.productos   add column if not exists atajo boolean not null default false;  -- botón rápido en Vender
+alter table public.productos   add column if not exists por_caja integer check (por_caja is null or por_caja between 2 and 1000);  -- unidades que trae la caja del proveedor
 alter table public.productos   add column if not exists proveedor_id uuid references public.proveedores(id) on delete set null;
 alter table public.movimientos add column if not exists descuento integer not null default 0;   -- venta: descuento por ofertas
 alter table public.movimientos add column if not exists medio text check (medio in ('efectivo','debito','transferencia'));  -- venta
@@ -274,7 +275,8 @@ end $$;
 
 -- Recepción de mercadería: actualiza el costo, marca el producto como disponible y,
 -- si viene un proveedor de la lista, lo deja como proveedor del producto.
--- items: [{"producto_id": "...", "cantidad": 24, "costo": 1300, "vence": "2026-11-02"}, ...]
+-- items: [{"producto_id": "...", "cantidad": 24, "costo": 1300, "vence": "2026-11-02", "por_caja": 12}, ...]
+-- (cantidad y costo siempre por unidad; por_caja es opcional y queda guardado en el producto)
 drop function if exists public.registrar_compra(text, jsonb);
 create or replace function public.registrar_compra(proveedor text, items jsonb, proveedor_id uuid default null) returns uuid
 language plpgsql security definer set search_path = public as $$
@@ -286,6 +288,7 @@ begin
          nullif(trim(registrar_compra.proveedor), ''), nullif(i->>'vence','')::date, g, auth.uid()
   from jsonb_array_elements(items) i where (i->>'cantidad')::numeric > 0;
   update productos p set costo = coalesce((i->>'costo')::int, p.costo), tiene = true, actualizado = now(),
+    por_caja = coalesce(nullif((i->>'por_caja')::int, 0), p.por_caja),
     proveedor_id = coalesce(registrar_compra.proveedor_id, p.proveedor_id)
   from jsonb_array_elements(items) i
   where p.id = (i->>'producto_id')::uuid and (i->>'cantidad')::numeric > 0;
