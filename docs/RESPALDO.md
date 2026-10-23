@@ -15,7 +15,7 @@ Conviene usar un Gmail solo para esto (por ejemplo `emporio.respaldos@gmail.com`
 
 ## 2. Crear la clave en la app
 
-1. Entra a la app con la cuenta de la administradora.
+1. Entra a la app con la **cuenta maestra** (solo ella ve esta opción; la dueña no la ve).
 2. Ve a **Más > Respaldo > Respaldo automático por correo** y toca **Crear clave**.
 3. Copia la clave que aparece. Se muestra una sola vez; si se pierde, se crea otra con **Cambiar clave**.
 
