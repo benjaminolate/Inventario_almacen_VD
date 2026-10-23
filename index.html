@@ -125,6 +125,8 @@ a.btn.primary{color:var(--brand-fg)}
 .sector{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);text-align:left;width:100%}
 .sector .name{font-weight:700;font-size:16px}
 .sector .sub{font-size:13px;color:var(--muted);grid-column:1/-1}
+.csec>summary{list-style:none;cursor:pointer}.csec>summary::-webkit-details-marker{display:none}
+.csec[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}.csec>.list{border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r) var(--r);background:var(--surface);padding:0 12px 4px}
 .formula{font-family:var(--font-display);font-weight:600;font-size:15px;background:var(--surface-2);border-radius:10px;padding:10px 12px}
 .countrow{display:grid;grid-template-columns:1fr 84px;gap:8px 10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
 .countrow .opts{grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
@@ -1709,9 +1711,10 @@ function openProv(v){
 function viewCostos(){
   const provs = ext("proveedores") ? (S.proveedores || []).slice().sort((a,b) => a.name.localeCompare(b.name)) : [];
   const f = ui.costProv || "todos", ps = S.products.filter(p => p.has || p.provId).sort((a,b) => a.name.localeCompare(b.name));
-  const groups = (provs.length ? [...provs.map(v => [v.id, v.name]), ["", "Sin proveedor"]] : [["*", "Todos los productos"]])
-    .filter(([id]) => f === "todos" || id === f)
-    .map(([id, name]) => [id, name, ps.filter(p => id === "*" || (p.provId || "") === id)]).filter(g => g[2].length);
+  const list = ps.filter(p => f === "todos" || (p.provId || "") === f), cats = [...SECTORS, ...new Set(list.map(p => p.cat).filter(c => !SECTORS.includes(c)))];
+  const groups = cats.map(c => [c, list.filter(p => p.cat === c)]).filter(g => g[1].length);
+  const avg = l => { const w = l.filter(p => p.price); return w.length ? Math.round(w.reduce((a,p) => a + (p.price - p.cost) / p.price, 0) / w.length * 100) : 0; };
+  const open = ui.costOpen || (ui.costOpen = new Set());
   const row = p => { const m = p.price - p.cost, pct = p.price ? Math.round(m / p.price * 100) : 0, u = isKg(p) ? "kg" : "c/u";
     return `<button class="item tap" data-cost="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div>
       <div class="sub">Costo ${clp(p.cost)} ${u}${p.porCaja && !isKg(p) ? ` · caja de ${p.porCaja}: <b>${clp(p.cost * p.porCaja)}</b>` : isKg(p) ? "" : " · caja sin dato"}</div>
@@ -1719,11 +1722,13 @@ function viewCostos(){
       <span class="pill ${pct < 10 ? "bad" : pct < 20 ? "warn" : "ok"}">${pct}%</span></button>`; };
   return `${backMasHtml()}
   <div class="stack">
-    <div><h2>${provs.length ? "Costos por proveedor" : "Costos y ganancia"}</h2><p class="small muted" style="margin:4px 0 0">Lo que le cuesta a la tienda cada producto, por unidad y por caja, y cuánto se gana al venderlo. El costo se actualiza solo al recibir mercadería.</p></div>
+    <div><h2>${provs.length ? "Costos por proveedor" : "Costos y ganancia"}</h2><p class="small muted" style="margin:4px 0 0">Lo que le cuesta a la tienda cada producto, por unidad y por caja, y cuánto se gana al venderlo. El costo se actualiza solo al recibir mercadería. Toca un sector para ver sus productos.</p></div>
     ${provs.length ? `<div class="chips" style="flex-wrap:wrap"><button class="chip" data-cprov="todos" aria-pressed="${f === "todos"}">Todos</button>${provs.map(v => `<button class="chip" data-cprov="${v.id}" aria-pressed="${f === v.id}">${esc(v.name)}</button>`).join("")}<button class="chip" data-cprov="" aria-pressed="${f === ""}">Sin proveedor</button></div>` : ""}
-    ${groups.map(([id, name, list]) => {
-      return `<div class="card" style="padding-bottom:4px"><div class="spread"><h3>${esc(name)}</h3><span class="small muted">${list.length} ${list.length === 1 ? "producto" : "productos"}</span></div>
-      <div class="list">${list.map(row).join("")}</div></div>`; }).join("") || `<div class="card empty">No hay productos de este proveedor todavía. Se asignan en cada producto o al recibir mercadería.</div>`}
+    ${groups.map(([c, l]) => { const pct = avg(l);
+      return `<details class="csec" data-csec="${esc(c)}"${open.has(c) ? " open" : ""}><summary class="sector"><span class="name">${esc(c)}</span>
+        <span class="pill ${pct < 10 ? "bad" : pct < 20 ? "warn" : "ok"}">${pct}%</span>
+        <span class="sub">${l.length} ${l.length === 1 ? "producto" : "productos"} · ganancia promedio ${pct}%</span></summary>
+      <div class="list">${l.map(row).join("")}</div></details>`; }).join("") || `<div class="card empty">No hay productos de este proveedor todavía. Se asignan en cada producto o al recibir mercadería.</div>`}
     <p class="small muted" style="margin:0">El porcentaje es la ganancia sobre el precio de venta: <span class="pill ok">20% o más</span> <span class="pill warn">10 a 19%</span> <span class="pill bad">menos de 10%</span></p>
   </div>`;
 }
@@ -1982,6 +1987,7 @@ function render(){
   if (v === "costos"){
     app.querySelectorAll("[data-cprov]").forEach(b => b.onclick = () => { ui.costProv = b.dataset.cprov; render(); });
     app.querySelectorAll("[data-cost]").forEach(b => b.onclick = () => openCosto(P(b.dataset.cost)));
+    app.querySelectorAll("[data-csec]").forEach(d => d.ontoggle = () => { const o = ui.costOpen || (ui.costOpen = new Set()); d.open ? o.add(d.dataset.csec) : o.delete(d.dataset.csec); });
   }
   if (v === "proveedores"){
     $("#addv").onclick = () => openProv(null);
