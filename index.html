@@ -652,6 +652,12 @@ const act = {
     await q(sb.from("productos").update(cols).eq("id", p.id));
     await fetchProducts([p.id]); return P(p.id);
   },
+  // Solo llena lo que falta (código o precio): lo puede hacer cualquiera al vender
+  async completeProduct(p, f){
+    if (!isDB()){ if (f.barcode && !p.barcode) p.barcode = f.barcode; if (f.price && !p.price) p.price = f.price; save(); return p; }
+    await q(sb.rpc("completar_producto", { p_id:p.id, p_codigo:f.barcode || null, p_precio:f.price || null }));
+    await fetchProducts([p.id]); return P(p.id);
+  },
   async newProduct(f, qty){
     if (!isDB()){
       const p = { id:"n"+uid(), name:f.name, cat:f.cat, price:f.price, cost:Math.round(f.price*0.65), pop:0, barcode:f.barcode, min:f.cat === "Pan" ? 10 : f.unit === "kg" ? 2 : 3, unit:f.unit || "un", atajo:!!f.atajo, reserva:!!f.reserva, has:true, countQty:null, countAt:null, estimated:false };
@@ -893,13 +899,13 @@ function openAssociate(code, cb){
     <p style="margin:0">El código <span class="code">${esc(code)}</span> todavía no está asociado a ningún producto. Elige cuál es y desde ahora se reconocerá solo.</p>
     <input class="input" id="assocQ" placeholder="Buscar en el catálogo, ej: lentejas">
     <div class="list" id="assocList">${render("")}</div>
-    <button class="btn block" id="assocNew">+ Crear producto nuevo con este código</button>
+    ${can("productos") ? `<button class="btn block" id="assocNew">+ Crear producto nuevo con este código</button>` : ""}
   </div>`);
   const bind = () => document.querySelectorAll("#assocList [data-pid]").forEach(b => b.onclick = () => run(async () => {
-    const p = await act.updateProduct(P(b.dataset.pid), { barcode:code }); closeModal(); toast(`Código asociado a ${p.name}`); cb(p); }));
+    const p = await act.completeProduct(P(b.dataset.pid), { barcode:code }); closeModal(); toast(`Código asociado a ${p.name}`); cb(p); }));
   bind();
   $("#assocQ").oninput = e => { $("#assocList").innerHTML = render(e.target.value); bind(); };
-  $("#assocNew").onclick = () => openProductForm(null, code, cb);
+  if ($("#assocNew")) $("#assocNew").onclick = () => openProductForm(null, code, cb);
 }
 
 // ---------- Modal ----------
@@ -990,6 +996,7 @@ const fmtDia = v => new Date(v + "T12:00:00").toLocaleDateString("es-CL", { week
 
 // ---------- Vistas ----------
 const ICONS = {
+  resumen:'<svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>',
   inicio:'<svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
   vender:'<svg viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11.2L21 7H6.2"/><circle cx="9" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>',
   recibir:'<svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>',
@@ -1014,9 +1021,9 @@ const ICONS = {
   ajustes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>'
 };
 const LABELS = { inicio:"Inicio", vender:"Vender", contar:"Contar", productos:"Productos", fiados:"Fiados", mas:"Más" };
-const IN_MAS = ["costos","pagina","respaldo","instalar","mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
+const IN_MAS = ["resumen","costos","pagina","respaldo","instalar","mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
 function renderTabs(){
-  const keys = Object.keys(LABELS).filter(k => k !== "fiados" || ext("fiados"));
+  const keys = Object.keys(LABELS).filter(k => (k !== "fiados" || ext("fiados")) && (!VIEW_PERM[k] || can(VIEW_PERM[k])));
   $("#tabs").style.gridTemplateColumns = `repeat(${keys.length},1fr)`;
   $("#tabs").innerHTML = keys.map(k => `<button data-view="${k}" ${ui.view===k || (k==="mas" && IN_MAS.includes(ui.view))?'aria-current="page"':''}>${ICONS[k]}<span>${LABELS[k]}</span></button>`).join("");
   document.querySelectorAll("#tabs [data-view]").forEach(b => b.onclick = () => go(b.dataset.view));
@@ -1043,20 +1050,20 @@ function viewInicio(){
   return `${isDB() ? header(db.ajustes.tienda_nombre || "Almacén", "Sistema de inventario") : header("Almacén", "Sistema de inventario · demo")}
   <div class="stack">
     ${isDB() ? "" : `<div class="demo-banner"><span>Demo con datos ficticios de ejemplo.</span><button class="btn sm" id="reset">Reiniciar demo</button></div>`}
-    ${ext("pan") ? `<button class="panbtn" id="panbtn">${ICONS.pan}<span><b>Avisar que llegó el pan</b><small>Envía el mensaje al grupo de WhatsApp de clientes</small></span></button>` : ""}
+    ${ext("pan") && can("whatsapp") ? `<button class="panbtn" id="panbtn">${ICONS.pan}<span><b>Avisar que llegó el pan</b><small>Envía el mensaje al grupo de WhatsApp de clientes</small></span></button>` : ""}
     ${vSoon.length ? `<button class="sector" data-go="vencimientos"><span class="name">Vence esta semana</span><span class="pill ${vSoon.some(m => diasPara(m.vence) < 0) ? "bad" : "warn"}">${vSoon.length} ${vSoon.length === 1 ? "producto" : "productos"}</span><span class="sub">${esc(vSoon.slice(0,3).map(m => P(m.pid)?.name || "Producto").join(", "))}. Conviene venderlo antes o rebajarlo.</span></button>` : ""}
     ${resPend.length ? `<button class="sector" data-go="reservas"><span class="name">Reservas de pan de hoy</span><span class="pill warn">${resPend.length} por entregar</span><span class="sub">Toca para ver quién reservó y marcar lo entregado</span></button>` : ""}
     <div class="kpis">
       <div class="card kpi"><div class="num">${pct}%</div><div class="lbl">del inventario contado</div><div class="bar"><i style="width:${pct}%"></i></div></div>
-      <div class="card kpi"><div class="num">${clp(money)}</div><div class="lbl">vendido hoy · ${units} ${units === 1 ? "línea" : "líneas"} de venta</div></div>
+      <div class="card kpi">${can("resumen") ? `<div class="num">${clp(money)}</div><div class="lbl">vendido hoy · ${units} ${units === 1 ? "línea" : "líneas"} de venta</div>` : `<div class="num">${units}</div><div class="lbl">${units === 1 ? "línea" : "líneas"} de venta hoy</div>`}</div>
     </div>
     <div class="card stack">
-      <div class="spread"><h3>Avance del conteo por sector</h3><button class="btn sm" data-go="contar">Contar</button></div>
+      <div class="spread"><h3>Avance del conteo por sector</h3>${can("contar") ? `<button class="btn sm" data-go="contar">Contar</button>` : ""}</div>
       <div class="row">${sectorState}</div>
       <p class="small muted" style="margin:0">Cada sector queda al día desde su propio conteo. Mientras tanto, las ventas de todo se registran igual.</p>
     </div>
     <div class="card">
-      <div class="spread"><h3>Por acabarse</h3>${ext("proveedores") && low.length ? `<button class="btn sm" data-go="compras">Lista de compras · ${low.length}</button>` : `<span class="small muted">${low.length} productos</span>`}</div>
+      <div class="spread"><h3>Por acabarse</h3>${ext("proveedores") && can("proveedores") && low.length ? `<button class="btn sm" data-go="compras">Lista de compras · ${low.length}</button>` : `<span class="small muted">${low.length} productos</span>`}</div>
       <div class="list">${low.slice(0,6).map(([p,s]) => `<div class="item"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">Mínimo: ${p.min}</div></div>${stockPill(p)}</div>`).join("") || `<div class="empty">Nada bajo el mínimo.</div>`}</div>
     </div>
     <div class="card">
@@ -1155,7 +1162,7 @@ function askPrice(p, then){
   </div>`);
   const i = $("#apv"); i.focus();
   const ok = () => run(async () => { const v = Math.round(+i.value || 0); if (v <= 0){ i.focus(); return; }
-    const q = await act.updateProduct(p, { price:v }); closeModal(); toast(`Precio de ${q.name}: ${clp(v)}${kg ? "/kg" : ""}`); then(q); });
+    const q = await act.completeProduct(p, { price:v }); closeModal(); toast(`Precio de ${q.name}: ${clp(v)}${kg ? "/kg" : ""}`); then(q); });
   $("#apok").onclick = ok; i.onkeydown = e => { if (e.key === "Enter") ok(); };
 }
 // Venta a granel: por peso (kilos) o por monto ("$1.000 de pan")
@@ -1190,7 +1197,7 @@ function openGranel(p, idx){
 }
 
 function viewRecibir(){
-  const total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos"), anyBox = ui.recv.items.some(l => l.box);
+  const cc = can("costos"), total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos"), anyBox = ui.recv.items.some(l => l.box);
   return `${backMasHtml()}${header("Recibir mercadería", "Lo que llega del proveedor").replace(netPill(), "")}
   <div class="stack">
     <div class="field"><label for="sup">Proveedor o distribuidora</label>
@@ -1200,17 +1207,17 @@ function viewRecibir(){
       <span class="small muted">Una distribuidora nueva queda guardada al guardar la recepción.</span></div>
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto recibido" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
-    ${provPicks()}
+    <div id="provpicks">${provPicks()}</div>
     <div class="card">
       <h3>Productos recibidos</h3>
-      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:1fr 80px 96px"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
+      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:${cc ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
         <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
-        <input class="input" type="number" min="0" inputmode="numeric" value="${l.cost}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">
-        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : "unidades"}</span></div>`}
+        ${cc ? `<input class="input" type="number" min="0" inputmode="numeric" value="${l.cost}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">` : ""}
+        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades${cc ? ` a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : ""}` : "unidades"}</span></div>`}
         ${venc ? `<div class="opts"><label for="rv${i}">Vence</label><input class="input" style="width:auto;font-size:14px;font-weight:500;padding:6px 8px" type="date" id="rv${i}" value="${esc(l.vence || "")}" data-rv="${i}"><span class="muted">opcional</span></div>` : ""}</div>`; }).join("") +
-        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span><span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span></div>`
+        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span>${cc ? `<span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span>` : ""}</div>`
         : `<div class="empty">Agrega los productos de la factura. Ejemplo: 2 cajas de Coca-Cola 1,5 L = 24 unidades.</div>`}
-      <div class="spread" style="padding-top:12px"><span class="muted">Total factura</span><span class="total">${clp(total)}</span></div>
+      ${cc ? `<div class="spread" style="padding-top:12px"><span class="muted">Total factura</span><span class="total">${clp(total)}</span></div>` : ""}
     </div>
     ${venc ? `<p class="small muted" style="margin:0">Anota la fecha de vencimiento de lo perecible (lácteos, cecinas, pan envasado) y la app avisa en Inicio lo que vence esta semana.</p>` : ""}
     <button class="btn primary block" id="confirm" ${ui.recv.items.length?"":"disabled"}>Guardar recepción</button>
@@ -1224,6 +1231,10 @@ function provPicks(){
     ${ps.length ? `<div class="chips" style="flex-wrap:wrap">${ps.map(p => `<button class="chip" data-radd="${p.id}" aria-pressed="${ui.recv.items.some(l => l.pid === p.id)}">${esc(p.name)}</button>`).join("")}</div>
       <span class="small muted">Toca los que llegaron y se agregan abajo.</span>`
       : `<span class="small muted">Este proveedor todavía no tiene productos asociados. Asócialos una vez y aparecen aquí cada vez que te traiga mercadería.</span>`}</div>`;
+}
+function bindProvPicks(){
+  document.querySelectorAll("[data-radd]").forEach(b => b.onclick = () => addToRecv(P(b.dataset.radd)));
+  if ($("#rpick")) $("#rpick").onclick = () => openProvPick(provById(ui.recv.provId), true);
 }
 function addToRecv(p){ const l = ui.recv.items.find(l => l.pid === p.id); if (l) l.qty++;
   else if (p.porCaja && !isKg(p)) ui.recv.items.push({ pid:p.id, box:true, n:p.porCaja, qty:1, cost:p.cost * p.porCaja });
@@ -1248,7 +1259,7 @@ function viewContar(){
   return `<header class="top"><button class="btn sm" id="back">← Regresar a sectores</button><span class="small muted">${ps.filter(p=>p.has).length} productos</span></header>
   <div class="stack">
     <div><h2>Contando: ${esc(ui.sector)}</h2><p class="small muted" style="margin:4px 0 0">Escribe lo que hay en la estantería. Cada escaneo suma 1. Lo que no tengan, márcalo y desaparece de las listas.</p></div>
-    <div class="row"><button class="btn accent" id="scan">Escanear (+1)</button><button class="btn" id="addp">+ Agregar producto</button></div>
+    <div class="row"><button class="btn accent" id="scan">Escanear (+1)</button>${can("productos") ? `<button class="btn" id="addp">+ Agregar producto</button>` : ""}</div>
     <div class="card" style="padding-block:4px">
       ${ps.map(p => { const d = ui.draft[p.id] || {}; const off = d.none ?? !p.has; const prev = stockOf(p);
         return `<div class="countrow ${off?"off":""}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">${off ? "No lo tenemos" : prev==null ? "Sin contar" : `Sistema dice: ${fq(prev, p)}${p.estimated?" (aprox.)":""}`}</div></div>
@@ -1276,7 +1287,7 @@ function viewProductos(){
   const f = ui.prodFilter, list = findProducts(S.products.filter(p => f==="Todos" || (f==="Sin precio" ? !p.price : p.cat===f)), ui.prodQuery);
   return `${header("Productos", `${S.products.filter(p=>p.has).length} productos en el catálogo`)}
   <div class="stack">
-    <div class="searchbar"><input class="input" id="pq" placeholder="Buscar" value="${esc(ui.prodQuery)}"><button class="btn primary" id="addp">+ Agregar</button></div>
+    <div class="searchbar"><input class="input" id="pq" placeholder="Buscar" value="${esc(ui.prodQuery)}">${can("productos") ? `<button class="btn primary" id="addp">+ Agregar</button>` : ""}</div>
     <div class="chips">${["Todos",...SECTORS,"Sin precio"].map(c => `<button class="chip" data-f="${esc(c)}" aria-pressed="${ui.prodFilter===c}">${esc(c)}</button>`).join("")}</div>
     <div class="card" style="padding-block:0"><div class="list" id="plist">${list.map(p => `<button class="item tap" data-open="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${precioTxt(p)} · ${esc(p.cat)}${p.barcode?" · con código":""}${p.atajo ? " · botón rápido" : ""}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados.</div>`}</div></div>
     <p class="small muted" style="margin:0">El catálogo viene precargado con productos típicos de almacén. Los nombres y precios se ajustan a lo que vende la tienda.</p>
@@ -1289,7 +1300,7 @@ function openProduct(p){
     <div class="row">${stockPill(p)}<span class="small muted">${p.countAt ? "Contado " + ago(p.countAt) : "Aún no se cuenta"}</span></div>
     <div class="grid2">
       <div class="field"><label for="ep">Precio venta${isKg(p) ? " (por kg)" : ""}</label><input class="input" id="ep" type="number" value="${p.price}"></div>
-      <div class="field"><label for="ec">Costo</label><input class="input" id="ec" type="number" value="${p.cost}"></div>
+      ${can("costos") ? `<div class="field"><label for="ec">Costo</label><input class="input" id="ec" type="number" value="${p.cost}"></div>` : ""}
       <div class="field"><label for="em">Stock mínimo</label><input class="input" id="em" type="number" value="${p.min}"></div>
       <div class="field"><label for="eb">Código de barras</label><input class="input code" id="eb" value="${esc(p.barcode)}" placeholder="Sin código"></div>
     </div>
@@ -1299,11 +1310,12 @@ function openProduct(p){
     <div class="field"><label for="eu">Se vende</label><select class="input" id="eu"><option value="un" ${!isKg(p) ? "selected" : ""}>Por unidad</option><option value="kg" ${isKg(p) ? "selected" : ""}>A granel, por kilo (precio por kg)</option></select></div>
     <label class="row"><input type="checkbox" id="eq" ${p.atajo ? "checked" : ""}> Botón rápido en Vender</label>
     ${activeOffers(p.id).length ? `<p class="small" style="margin:0;color:var(--ok);font-weight:600">En oferta: ${esc(activeOffers(p.id).map(offerTxt).join(" o "))}</p>` : ""}
-    <button class="btn primary block" id="esave">Guardar cambios</button>
+    ${can("productos") ? `<button class="btn primary block" id="esave">Guardar cambios</button>` : `<p class="small muted" style="margin:0">Solo la dueña o quien tenga permiso puede cambiar los datos del producto.</p>`}
     <div><h3>Últimos movimientos</h3><div class="list" id="phist">${hist.map(movRow).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
-  $("#esave").onclick = () => run(async () => {
-    const f = { price:+$("#ep").value||0, cost:+$("#ec").value||0, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name };
+  if (!can("productos")) document.querySelectorAll(".sheet input, .sheet select").forEach(i => i.disabled = true);
+  if ($("#esave")) $("#esave").onclick = () => run(async () => {
+    const f = { price:+$("#ep").value||0, cost:$("#ec") ? +$("#ec").value||0 : p.cost, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name };
     if ($("#ev")) f.provId = $("#ev").value || null;
     if ($("#ebx")) f.porCaja = +$("#ebx").value >= 2 ? Math.round(+$("#ebx").value) : null;
     f.unit = $("#eu").value; f.atajo = $("#eq").checked;
@@ -1384,8 +1396,8 @@ function openCliente(c){
   openModal(`<div class="stack">
     <div class="spread"><h2>${esc(c.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="spread"><div><div class="total">${clp(Math.max(0,s))}</div><div class="small muted">${s > 0 ? "saldo por pagar" : "al día"}${c.phone ? " · " + esc(c.phone) : ""}</div></div>
-      ${s > 0 ? `<a class="btn sm" href="${esc(waLink(c.phone, msg))}" ${WA_TARGET}>Recordar por WhatsApp</a>` : ""}</div>
-    ${s > 0 ? waWebNote("cweb", c.phone, msg) : ""}
+      ${s > 0 && can("whatsapp") ? `<a class="btn sm" href="${esc(waLink(c.phone, msg))}" ${WA_TARGET}>Recordar por WhatsApp</a>` : ""}</div>
+    ${s > 0 && can("whatsapp") ? waWebNote("cweb", c.phone, msg) : ""}
     <div class="grid2">
       <div class="field"><label for="fm">Monto</label><input class="input" id="fm" type="number" inputmode="numeric" placeholder="0"></div>
       <div class="field"><label for="fn">Detalle (opcional)</label><input class="input" id="fn" placeholder="Ej: pan y leche"></div>
@@ -1484,7 +1496,7 @@ function viewReservasDB(){
     <div class="card stack">
       <h3>Link para que los clientes reserven</h3>
       <div class="code">${esc(link)}</div>
-      <div class="grid2"><a class="btn" style="text-align:center" href="${esc(waLink("", msg))}" ${WA_TARGET}>Enviar por WhatsApp</a><button class="btn" id="rcopy">Copiar link</button></div>
+      <div class="grid2">${can("whatsapp") ? `<a class="btn" style="text-align:center" href="${esc(waLink("", msg))}" ${WA_TARGET}>Enviar por WhatsApp</a>` : ""}<button class="btn" id="rcopy">Copiar link</button></div>
       <label class="row"><input type="checkbox" id="ropen" ${abiertas?"checked":""}> Recibir reservas ahora</label>
       <div class="field"><label for="rlim">Reservas para el mismo día hasta las</label><select class="input" id="rlim">${Array.from({ length:18 }, (_, i) => i + 6).map(h => `<option value="${h}" ${h==lim?"selected":""}>${h}:00</option>`).join("")}</select></div>
       <p class="small muted" style="margin:0">Después de esa hora, los clientes solo pueden reservar para el día siguiente.</p>
@@ -1499,7 +1511,7 @@ function openReserva(r){
     <div class="formula">${esc(r.detail)}</div>
     ${r.note ? `<p style="margin:0">Nota: ${esc(r.note)}</p>` : ""}
     ${r.estado === "pendiente" ? `<button class="btn primary block" data-st="entregada">Marcar como entregada</button>` : `<button class="btn block" data-st="pendiente">Volver a pendiente</button>`}
-    ${r.phone ? `<a class="btn block" style="text-align:center" href="${esc(waLink(r.phone, ready))}" ${WA_TARGET}>Avisarle por WhatsApp que está listo</a>` : `<p class="small muted" style="margin:0">El cliente no dejó celular.</p>`}
+    ${!can("whatsapp") ? "" : r.phone ? `<a class="btn block" style="text-align:center" href="${esc(waLink(r.phone, ready))}" ${WA_TARGET}>Avisarle por WhatsApp que está listo</a>` : `<p class="small muted" style="margin:0">El cliente no dejó celular.</p>`}
     ${r.estado === "pendiente" ? `<button class="btn ghost block" data-st="cancelada">Cancelar reserva</button>` : ""}
   </div>`);
   document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => run(async () => { await act.reserva(r, b.dataset.st); closeModal(); render(); }));
@@ -1507,6 +1519,14 @@ function openReserva(r){
 
 // ---------- Equipo y cuenta (modo tienda) ----------
 const isAdmin = () => isDB() && db.profile?.rol === "admin";
+// Lo que la dueña puede dar a cada vendedor/a. Los tres últimos son solo de ella hasta que los dé.
+const PERMISOS = [["recibir","Recibir mercadería"],["contar","Contar stock"],["productos","Agregar y editar productos y precios"],["fiados","Fiados: anotar y cobrar"],
+  ["caja","Cierre de caja"],["proveedores","Proveedores y lista de compras"],["ofertas","Ofertas y packs"],
+  ["costos","Ver costos y ganancias"],["resumen","Ver resumen de ventas"],["whatsapp","Enviar mensajes por el WhatsApp de la tienda"]];
+const can = k => !isDB() || isAdmin() || (k !== "admin" && (db.profile?.permisos || []).includes(k));
+// Pantallas que necesitan un permiso ("admin" = solo la dueña)
+const VIEW_PERM = { recibir:"recibir", contar:"contar", fiados:"fiados", caja:"caja", proveedores:"proveedores", compras:"proveedores", ofertas:"ofertas",
+  costos:"costos", resumen:"resumen", pagina:"admin", extensiones:"admin", tiposdepan:"admin", respaldo:"admin" };
 function viewEquipo(){
   const me = db.profile, team = Object.values(db.team).sort((a,b) => (b.rol === "admin") - (a.rol === "admin") || a.nombre.localeCompare(b.nombre));
   return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button></header>
@@ -1521,7 +1541,7 @@ function viewEquipo(){
         ${!t.activo ? `<span class="pill bad">Sin acceso</span>` : `<span class="pill ${t.rol === "admin" ? "ok" : "none"}">${rolName(t)}</span>`}</button>`).join("")}</div></div>
     <div class="card stack"><h3>Tienda</h3>
       <div class="field"><label for="tname">Nombre que ven los clientes</label><div class="searchbar"><input class="input" id="tname" value="${esc(db.ajustes.tienda_nombre || "Almacén")}"><button class="btn" id="tsave">Guardar</button></div></div></div>
-    <p class="small muted" style="margin:0">Vendedores/as pueden vender, recibir, contar, anotar fiados y atender reservas. Solo la administradora agrega personas, cambia permisos y cambia usuarios o contraseñas. La cuenta maestra solo la cambia su dueño.</p>` : ""}
+    <p class="small muted" style="margin:0">Todos pueden vender y atender reservas. Lo demás lo elige la administradora en cada persona: recibir, contar, fiados, caja y más. Costos y ganancias, el resumen de ventas y los mensajes por WhatsApp son solo de la administradora hasta que ella los dé. Solo la administradora agrega personas y cambia usuarios o contraseñas. La cuenta maestra solo la cambia su dueño.</p>` : ""}
   </div>`;
 }
 const rolName = t => t.maestra ? "Cuenta maestra" : t.rol === "admin" ? "Administradora" : "Vendedor/a";
@@ -1535,17 +1555,21 @@ function openPersona(t){
     <div class="field"><label for="uusr">Usuario para entrar</label><input class="input" id="uusr" autocapitalize="none" autocomplete="off" value="${esc(t.usuario)}"></div>
     <div class="field"><label for="upw">Contraseña nueva</label><input class="input" id="upw" type="text" autocomplete="off" placeholder="Dejar vacío para no cambiarla"></div>
     ${t.maestra ? `<p class="small muted" style="margin:0">Es tu cuenta maestra: siempre es administradora y nadie más la puede cambiar.</p>` : `
-    <div class="field"><label for="urol">Permisos</label><select class="input" id="urol"><option value="vendedor" ${t.rol==="vendedor"?"selected":""}>Vendedor/a</option><option value="admin" ${t.rol==="admin"?"selected":""}>Administradora</option></select></div>
+    <div class="field"><label for="urol">Rol</label><select class="input" id="urol"><option value="vendedor" ${t.rol==="vendedor"?"selected":""}>Vendedor/a</option><option value="admin" ${t.rol==="admin"?"selected":""}>Administradora (puede todo)</option></select></div>
+    <div class="field" id="upermbox" ${t.rol === "admin" ? "hidden" : ""}><label>Qué puede hacer, además de vender</label>
+      <div class="stack" style="gap:6px">${PERMISOS.map(([k, n]) => `<label class="row"><input type="checkbox" data-uperm="${k}" ${(t.permisos || []).includes(k) ? "checked" : ""}> ${esc(n)}</label>`).join("")}</div></div>
     <label class="row"><input type="checkbox" id="uact" ${t.activo?"checked":""}> Puede entrar al sistema</label>`}
     <button class="btn primary block" id="usave">Guardar</button>
     <p class="small muted" style="margin:0">Si cambias el usuario o la contraseña, entrégale los nuevos datos a la persona.</p>`}
   </div>`);
   if (locked) return;
+  if ($("#urol")) $("#urol").onchange = e => { $("#upermbox").hidden = e.target.value === "admin"; };
   $("#usave").onclick = () => run(async () => {
     const nombre = $("#unom").value.trim(), usuario = $("#uusr").value.trim().toLowerCase(), pw = $("#upw").value;
     if (!nombre) return $("#unom").focus(); if (!usuario) return $("#uusr").focus();
     if (pw && pw.length < 6) return toast("La contraseña debe tener al menos 6 caracteres");
-    const cambios = { nombre }; if (!t.maestra){ cambios.rol = $("#urol").value; cambios.activo = $("#uact").checked; }
+    const cambios = { nombre }; if (!t.maestra){ cambios.rol = $("#urol").value; cambios.activo = $("#uact").checked;
+      cambios.permisos = [...document.querySelectorAll("[data-uperm]:checked")].map(i => i.dataset.uperm); }
     await q(sb.from("perfiles").update(cambios).eq("id", t.id));
     if (usuario !== t.usuario || pw) await q(sb.rpc("cambiar_acceso", { persona:t.id, usuario_nuevo:usuario, clave_nueva:pw || null }));
     await dbLoadAll(); closeModal(); render();
@@ -1633,7 +1657,30 @@ function viewRespaldo(){
     <div class="card stack"><h3>Restaurar</h3>
       <p class="small muted" style="margin:0">Carga un respaldo descargado antes. Antes de restaurar se muestra qué trae el archivo.</p>
       <label class="btn block filebtn">Elegir archivo de respaldo<input type="file" id="restorefile" accept=".json,application/json"></label></div>
+    ${isDB() ? `<div class="card stack"><h3>Respaldo automático por correo</h3>
+      <p class="small muted" style="margin:0">Todos los días llega un correo a Gmail con el respaldo adjunto, sin tener que acordarse. Se configura una sola vez con la guía.</p>
+      <div id="autobk" class="small muted">Revisando…</div>
+      <div class="grid2"><button class="btn" id="bkkey">Crear clave</button><a class="btn" style="text-align:center" href="${BACKUP_GUIDE}" target="_blank" rel="noopener">Ver la guía</a></div></div>` : ""}
   </div>`;
+}
+const BACKUP_GUIDE = "https://github.com/benjaminolate/Inventario_almacen_VD/blob/main/docs/RESPALDO.md";
+async function loadAutoBackup(){
+  const r = await q(sb.rpc("hay_clave_respaldo")).catch(() => null), el = $("#autobk"); if (!el) return;
+  el.textContent = r ? `Hay una clave (creada ${ago(new Date(r).getTime())}). Si ya está puesta en GitHub, el respaldo llega solo cada noche.` : "Todavía no hay clave. Créala y sigue la guía.";
+  $("#bkkey").textContent = r ? "Cambiar clave" : "Crear clave";
+  $("#bkkey").onclick = () => openModal(`<div class="stack">
+    <div class="spread"><h2>${r ? "Cambiar la clave" : "Crear la clave"}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    ${r ? `<p style="margin:0">La clave anterior deja de funcionar: hay que poner la nueva en GitHub o los respaldos dejan de llegar.</p>` : `<p style="margin:0">La clave permite que el respaldo automático lea los datos. Se muestra una sola vez.</p>`}
+    <button class="btn primary block" id="bkgo">${r ? "Cambiar clave" : "Crear clave"}</button></div>`) || ($("#bkgo").onclick = () => run(async () => {
+      const k = await q(sb.rpc("nueva_clave_respaldo"));
+      openModal(`<div class="stack">
+        <div class="spread"><h2>Clave del respaldo</h2><button class="btn ghost sm" data-close>Listo</button></div>
+        <p style="margin:0">Cópiala y pégala en GitHub como el secreto <b>RESPALDO_CLAVE</b> (paso 3 de la guía). No se vuelve a mostrar.</p>
+        <input class="input code" id="bkval" readonly value="${esc(k)}">
+        <button class="btn primary block" id="bkcopy">Copiar clave</button>
+        <a class="btn block" style="text-align:center" href="${BACKUP_GUIDE}" target="_blank" rel="noopener">Abrir la guía</a></div>`);
+      $("#bkcopy").onclick = () => { const i = $("#bkval"); i.select(); (navigator.clipboard ? navigator.clipboard.writeText(k) : Promise.reject()).then(() => toast("Clave copiada"), () => { document.execCommand("copy"); toast("Clave copiada"); }); };
+      loadAutoBackup(); }));
 }
 
 // ---------- Página de la tienda (hub con links) ----------
@@ -1773,7 +1820,7 @@ function viewCompras(){
       <div class="list">${g.items.map(i => `<div class="item"><div class="main"><div class="name">${esc(i.p.name)}</div><div class="sub">Quedan ${fq(i.s, i.p)} · mínimo ${fq(i.p.min, i.p)}</div></div>
         <input class="input" style="width:76px;text-align:center;font-weight:700" type="number" min="0" inputmode="numeric" value="${i.q}" data-sq="${i.p.id}" aria-label="Pedir de ${esc(i.p.name)}"></div>`).join("")}</div>
       ${g.v ? "" : `<p class="small muted" style="margin:0">Asigna el proveedor de cada producto en Productos para que quede en su grupo.</p>`}
-      <div class="grid2"><a class="btn" style="text-align:center" href="${esc(waLink(g.v?.phone || "", pedidoMsg(g)))}" ${WA_TARGET}>Pedir por WhatsApp</a><button class="btn" data-scopy="${gi}">Copiar pedido</button></div>
+      <div class="grid2">${can("whatsapp") ? `<a class="btn" style="text-align:center" href="${esc(waLink(g.v?.phone || "", pedidoMsg(g)))}" ${WA_TARGET}>Pedir por WhatsApp</a>` : ""}<button class="btn" data-scopy="${gi}">Copiar pedido</button></div>
       <button class="btn primary block" data-srecv="${gi}">Recibir este pedido</button>
     </div>`).join("") || `<div class="card empty">Nada bajo el mínimo. Cuando un producto contado baja de su stock mínimo, aparece aquí.</div>`}
     <p class="small muted" style="margin:0">Solo aparecen productos ya contados. El mínimo de cada producto se cambia en Productos.</p>
@@ -1836,6 +1883,55 @@ function openProvPick(v, fromRecv){
 }
 
 // ---------- Costos por proveedor: cuánto cuesta cada producto por unidad y por caja ----------
+// ---------- Resumen de ventas (dueña, o quien tenga el permiso) ----------
+const RES_PER = [["hoy","Hoy"],["semana","7 días"],["mes","Este mes"],["mespasado","Mes pasado"]];
+function resRange(k){
+  const d = new Date(); d.setHours(0,0,0,0);
+  if (k === "hoy") return [d, new Date(d.getTime() + D)];
+  if (k === "semana") return [new Date(d.getTime() - 6*D), new Date(d.getTime() + D)];
+  const m0 = new Date(d.getFullYear(), d.getMonth(), 1);
+  return k === "mes" ? [m0, new Date(d.getTime() + D)] : [new Date(d.getFullYear(), d.getMonth() - 1, 1), m0];
+}
+function viewResumen(){
+  const k = ui.resPer || "semana";
+  return `${backMasHtml()}
+  <div class="stack">
+    <div><h2>Resumen de ventas</h2><p class="small muted" style="margin:4px 0 0">Lo vendido en el período, por medio de pago, por día y por producto.</p></div>
+    <div class="chips">${RES_PER.map(([v, n]) => `<button class="chip" data-rper="${v}" aria-pressed="${k === v}">${n}</button>`).join("")}</div>
+    <div id="resbox"><div class="card empty">Calculando…</div></div>
+  </div>`;
+}
+async function loadResumen(){
+  const k = ui.resPer || "semana", [d0, d1] = resRange(k);
+  const rows = isDB()
+    ? (await all(() => sb.from("movimientos").select("id,producto_id,cantidad,precio,descuento,medio,grupo,at").eq("tipo","venta").gte("at", d0.toISOString()).lt("at", d1.toISOString()).order("at")))
+        .map(r => ({ pid:r.producto_id, qty:+r.cantidad, price:r.precio || 0, disc:r.descuento || 0, medio:r.medio, g:r.grupo || r.id, at:iso(r.at) }))
+    : S.movs.filter(m => m.type === "venta" && m.at >= d0.getTime() && m.at < d1.getTime()).map(m => ({ pid:m.pid, qty:m.qty, price:m.price || 0, disc:m.disc || 0, medio:m.medio, g:m.at, at:m.at }));
+  const box = $("#resbox"); if (ui.view !== "resumen" || !box || (ui.resPer || "semana") !== k) return;
+  if (!rows.length){ box.innerHTML = `<div class="card empty">No hay ventas en este período.</div>`; return; }
+  const cc = can("costos"), money = r => lineMoney(r.qty, r.price) - r.disc;
+  let total = 0, gan = 0, sinCosto = new Set(); const medios = {}, dias = {}, prods = {};
+  rows.forEach(r => { const m = money(r), p = P(r.pid); total += m;
+    medios[r.medio || "efectivo"] = (medios[r.medio || "efectivo"] || 0) + m;
+    const dk = new Date(r.at).toLocaleDateString("es-CL", { weekday:"short", day:"numeric", month:"short" }); dias[dk] = (dias[dk] || 0) + m;
+    const x = prods[r.pid] ||= { qty:0, money:0, gan:0 }; x.qty += r.qty; x.money += m;
+    if (p && p.cost){ const g = m - Math.round(r.qty * p.cost); x.gan += g; gan += g; } else sinCosto.add(r.pid); });
+  const n = new Set(rows.map(r => r.g)).size, maxDia = Math.max(...Object.values(dias));
+  const top = Object.entries(prods).sort((a,b) => b[1].money - a[1].money).slice(0, 10);
+  box.innerHTML = `<div class="stack">
+    <div class="kpis">
+      <div class="card kpi"><div class="num">${clp(total)}</div><div class="lbl">vendido</div></div>
+      <div class="card kpi"><div class="num">${n}</div><div class="lbl">${n === 1 ? "venta" : "ventas"} · promedio ${clp(total / n)}</div></div>
+      ${cc ? `<div class="card kpi"><div class="num">${clp(gan)}</div><div class="lbl">ganancia estimada${total ? " · " + Math.round(gan / total * 100) + "%" : ""}</div></div>` : ""}
+    </div>
+    ${cc && sinCosto.size ? `<p class="small muted" style="margin:0">${sinCosto.size} ${sinCosto.size === 1 ? "producto vendido no tiene" : "productos vendidos no tienen"} costo y no ${sinCosto.size === 1 ? "suma" : "suman"} a la ganancia. La ganancia usa el costo actual de cada producto.</p>` : ""}
+    <div class="card"><h3>Por medio de pago</h3><div class="list">${MEDIOS.filter(([m]) => medios[m]).map(([m, nm]) => `<div class="item"><div class="main"><div class="name">${nm}</div></div><div class="qty">${clp(medios[m])}</div></div>`).join("")}</div></div>
+    ${Object.keys(dias).length > 1 ? `<div class="card stack"><h3>Por día</h3>${Object.entries(dias).map(([d, m]) => `<div style="display:grid;grid-template-columns:96px 1fr 84px;gap:8px;align-items:center"><span class="small muted">${esc(d)}</span><div class="bar" style="margin:0"><i style="width:${Math.max(2, Math.round(m / maxDia * 100))}%"></i></div><span class="small" style="text-align:right;font-weight:600">${clp(m)}</span></div>`).join("")}</div>` : ""}
+    <div class="card"><h3>Lo que más vendió</h3><div class="list">${top.map(([id, x]) => { const p = P(id);
+      return `<div class="item"><div class="main"><div class="name">${esc(p ? p.name : "Producto")}</div><div class="sub">${p ? fq(x.qty, p) : x.qty}${cc && p && p.cost ? " · ganancia " + clp(x.gan) : ""}</div></div><div class="qty">${clp(x.money)}</div></div>`; }).join("")}</div></div>
+  </div>`;
+}
+
 function viewCostos(){
   const provs = ext("proveedores") ? (S.proveedores || []).slice().sort((a,b) => a.name.localeCompare(b.name)) : [];
   const f = ui.costProv || "todos", ps = S.products.filter(p => p.has || p.provId).sort((a,b) => a.name.localeCompare(b.name));
@@ -2051,7 +2147,7 @@ function openPanTipo(p){
 
 function viewMas(){
   const pend = isDB() ? S.reservas.filter(r => r.dia === hoyChile() && r.estado === "pendiente").length : S.reservas.filter(r => !r.done).length;
-  const opt = (go, icon, title, sub) => `<button class="sector" data-go="${go}"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS[icon]}</span>${title}</span><span></span><span class="sub">${sub}</span></button>`;
+  const opt = (go, icon, title, sub) => VIEW_PERM[go] && !can(VIEW_PERM[go]) ? "" : `<button class="sector" data-go="${go}"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS[icon]}</span>${title}</span><span></span><span class="sub">${sub}</span></button>`;
   const low = lowStock().length, venc = vencList().filter(m => diasPara(m.vence) <= 7).length, nOfe = (S.ofertas || []).filter(o => o.active).length;
   const sec = (title, items) => items.join("") ? `<h3 style="margin-top:8px">${title}</h3>${items.join("")}` : "";
   const nPan = panes().length;
@@ -2062,19 +2158,21 @@ function viewMas(){
       ext("proveedores") ? opt("proveedores","proveedores","Proveedores", `${(S.proveedores || []).length} ${(S.proveedores || []).length === 1 ? "guardado" : "guardados"} · contacto y productos de cada uno`) : "",
       opt("costos","costos", ext("proveedores") ? "Costos por proveedor" : "Costos y ganancia","Cuánto cuesta cada producto por unidad y por caja"),
       ext("proveedores") ? opt("compras","compras","Lista de compras", low ? `${low} ${low === 1 ? "producto" : "productos"} bajo el mínimo` : "Nada bajo el mínimo") : ""])}
+    ${sec("Negocio", [
+      opt("resumen","resumen","Resumen de ventas","Cuánto se vendió y ganó por día, semana y mes")])}
     ${sec("Logística", [
       ext("vencimientos") ? opt("vencimientos","vencimientos","Vencimientos", venc ? `${venc} vencen esta semana o ya vencieron` : "Nada por vencer esta semana") : "",
       ext("ofertas") ? opt("ofertas","ofertas","Ofertas y packs", `${nOfe} ${nOfe === 1 ? "oferta activa" : "ofertas activas"}`) : "",
       ext("caja") ? opt("caja","caja","Cierre de caja","Cuadrar efectivo, débito y transferencia") : "",
       opt("historial","historial","Historial","Todo lo que entra, sale y se cuenta")])}
     ${sec("Ayudas", ext("pan") ? [
-      `<button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>`,
+      can("whatsapp") ? `<button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>` : "",
       opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa")),
       opt("tiposdepan","pan","Tipos de pan", `${nPan} ${nPan === 1 ? "tipo" : "tipos"} · precio por unidad y botones rápidos`)] : [])}
     ${sec("Configuración", [
       isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : "",
       opt("pagina","pagina","Página de la tienda","Links para clientes: reseñas, grupo de WhatsApp, reservas y QR"),
-      !isDB() || isAdmin() ? opt("respaldo","respaldo","Respaldo","Descargar o restaurar una copia de los datos") : "",
+      opt("respaldo","respaldo","Respaldo","Descargar o restaurar una copia, y respaldo automático por correo"),
       opt("instalar","instalar","Instalar la app", isStandalone() ? "Ya está instalada en este aparato" : "Con su ícono en el celular o computador"),
       opt("extensiones","ajustes","Extensiones","Encender o apagar partes de la app"),
       opt("apariencia","apariencia","Apariencia","Tema claro u oscuro, fuente y colores")])}
@@ -2093,14 +2191,14 @@ function render(){
   if (!isDB()) purgeReservas();
   if (ui.view === "equipo" && !isDB()) ui.view = "mas";
   if (ui.view === "ajustes") ui.view = "extensiones";
-  if (ui.view === "respaldo" && isDB() && !isAdmin()) ui.view = "mas";
+  if (VIEW_PERM[ui.view] && !can(VIEW_PERM[ui.view])) ui.view = ["contar","fiados"].includes(ui.view) ? "inicio" : "mas";
   if (VIEW_EXT[ui.view] && !ext(VIEW_EXT[ui.view])) ui.view = ui.view === "fiados" ? "inicio" : "mas";
   renderTabs();
   const v = ui.view, app = $("#app");
   app.innerHTML = ({ inicio:viewInicio, vender:viewVender, recibir:viewRecibir, contar:viewContar, productos:viewProductos, historial:viewHistorial, fiados:viewFiados, mas:viewMas,
     reservas: isDB() ? viewReservasDB : viewReservas, equipo:viewEquipo, compras:viewCompras, proveedores:viewProveedores, costos:viewCostos, vencimientos:viewVencimientos,
     ofertas:viewOfertas, caja:viewCaja, extensiones:viewExtensiones, apariencia:viewApariencia, tiposdepan:viewTiposPan,
-    pagina:viewPagina, respaldo:viewRespaldo, instalar:viewInstalar })[v]();
+    pagina:viewPagina, respaldo:viewRespaldo, instalar:viewInstalar, resumen:viewResumen })[v]();
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   const pb = $("#panbtn"); if (pb) pb.onclick = openPan;
   if (v === "compras"){
@@ -2129,6 +2227,10 @@ function render(){
     $("#addo").onclick = () => openOferta(null);
     app.querySelectorAll("[data-ofe]").forEach(b => b.onclick = () => openOferta(S.ofertas.find(o => o.id === b.dataset.ofe)));
   }
+  if (v === "resumen"){
+    app.querySelectorAll("[data-rper]").forEach(b => b.onclick = () => { ui.resPer = b.dataset.rper; render(); });
+    loadResumen().catch(e => { const b = $("#resbox"); if (b) b.innerHTML = `<div class="card empty">${esc(friendly(e))}</div>`; });
+  }
   if (v === "caja") loadCaja().catch(e => { const b = $("#cajabox"); if (b) b.innerHTML = `<div class="card empty">${esc(friendly(e))}</div>`; });
   if (v === "apariencia"){
     app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); softRender(); });
@@ -2142,6 +2244,7 @@ function render(){
   if (v === "respaldo"){
     $("#backup").onclick = () => run(downloadBackup);
     $("#restorefile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) openRestore(f); };
+    if (isDB()) loadAutoBackup();
   }
   if (v === "instalar"){ const b = $("#doinstall"); if (b) b.onclick = async () => { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; render(); }; }
   if (v === "pagina"){
@@ -2220,14 +2323,14 @@ function render(){
   if (v === "recibir"){
     bindSearch(addToRecv);
     $("#sup").oninput = e => { ui.recv.supplier = e.target.value; const n = e.target.value.trim().toLowerCase();
-      ui.recv.provId = (S.proveedores || []).find(v => v.name.toLowerCase() === n)?.id || null; };
-    $("#sup").onchange = () => softRender();
+      const prev = ui.recv.provId; ui.recv.provId = (S.proveedores || []).find(v => v.name.toLowerCase() === n)?.id || null;
+      // Al escribir el nombre exacto de un proveedor aparecen sus productos, sin redibujar la pantalla
+      if (prev !== ui.recv.provId){ $("#provpicks").innerHTML = provPicks(); bindProvPicks(); } };
+    bindProvPicks();
     app.querySelectorAll("[data-rprov]").forEach(b => b.onclick = () => { const p = provById(b.dataset.rprov);
       ui.recv.provId = p.id; ui.recv.supplier = p.name; softRender(); });
     app.querySelectorAll("[data-rv]").forEach(i => i.onchange = () => { ui.recv.items[i.dataset.rv].vence = i.value; });
     $("#scan").onclick = () => openScanSheet(scanAction());
-    app.querySelectorAll("[data-radd]").forEach(b => b.onclick = () => addToRecv(P(b.dataset.radd)));
-    if ($("#rpick")) $("#rpick").onclick = () => openProvPick(provById(ui.recv.provId), true);
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
@@ -2252,7 +2355,7 @@ function render(){
       app.querySelectorAll("[data-ce]").forEach(i => i.onchange = () => { (ui.draft[i.dataset.ce] ||= {}).est = i.checked; });
       app.querySelectorAll("[data-cn]").forEach(b => b.onclick = () => { const p = P(b.dataset.cn); const d = (ui.draft[p.id] ||= {}); const off = d.none ?? !p.has; d.none = !off; render(); });
       $("#scan").onclick = () => openScanSheet(scanAction());
-      $("#addp").onclick = () => openProductForm(ui.sector, "", () => render());
+      if ($("#addp")) $("#addp").onclick = () => openProductForm(ui.sector, "", () => render());
       $("#finish").onclick = finishCount;
     }
   }
@@ -2260,7 +2363,7 @@ function render(){
     $("#pq").oninput = e => { ui.prodQuery = e.target.value; const pos = e.target.selectionStart; render(); const n = $("#pq"); n.focus(); n.setSelectionRange(pos,pos); };
     app.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { ui.prodFilter = b.dataset.f; render(); });
     app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openProduct(P(b.dataset.open)));
-    $("#addp").onclick = () => openProductForm(SECTORS.includes(ui.prodFilter) ? ui.prodFilter : null, "", null);
+    if ($("#addp")) $("#addp").onclick = () => openProductForm(SECTORS.includes(ui.prodFilter) ? ui.prodFilter : null, "", null);
   }
   if (v === "historial"){
     app.querySelectorAll("[data-hf]").forEach(b => b.onclick = () => { ui.histFilter = b.dataset.hf; render(); });

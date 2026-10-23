@@ -18,6 +18,7 @@ respaldos/
 backups/
 *.sql
 !supabase/schema.sql
+!supabase/catalogo_emporio.sql
 *.sqlite
 *.db
 *.csv
@@ -28,3 +29,4 @@ datos-reales/
 node_modules/
 dist/
 *.log
+__pycache__/

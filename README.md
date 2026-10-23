@@ -75,6 +75,8 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 
 **Multiusuario (con Supabase)**
 - Inicio de sesión con usuario y contraseña; roles de administradora y vendedor/a.
+- Permisos por vendedor/a elegidos por la administradora (recibir, contar, productos, fiados, caja, proveedores, ofertas). Costos y ganancias, resumen de ventas y mensajes por WhatsApp son solo de ella hasta que los dé.
+- **Resumen de ventas:** hoy, 7 días, este mes y mes pasado, con medio de pago, ventas por día, lo más vendido y ganancia estimada.
 - Todos los celulares y computadores ven el mismo stock y se actualizan en vivo.
 - El historial registra quién hizo cada movimiento, con la hora del servidor.
 
@@ -87,6 +89,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Sin internet:** las ventas y los fiados se guardan en el celular y se envían solos al volver la conexión, sin duplicarse.
 - **Seguridad:** registro cerrado (solo la administradora crea cuentas), cuenta maestra protegida, límites contra reservas falsas y cabeceras de seguridad en Cloudflare (`_headers`).
 - **Respaldo:** descargar todo en un archivo y **restaurarlo** después (solo agrega lo que falta, no borra nada).
+- **Respaldo automático diario por Gmail** con GitHub Actions y una clave que solo permite leer el respaldo ([guía](docs/RESPALDO.md)).
 - Datos ficticios de ejemplo y botón **"Reiniciar demo"**.
 
 ## Tecnologías

@@ -23,6 +23,10 @@ create table if not exists public.perfiles (
   activo  boolean not null default false,
   creado  timestamptz not null default now()
 );
+-- Qué puede hacer cada vendedor/a (la administradora puede todo). Los permisos que no
+-- vienen por defecto (costos, resumen, whatsapp) son de la dueña salvo que ella los dé.
+alter table public.perfiles add column if not exists permisos text[] not null
+  default array['recibir','contar','productos','fiados','caja','proveedores','ofertas'];
 
 -- Es miembro activo de la tienda
 create or replace function public.es_miembro() returns boolean
@@ -33,6 +37,11 @@ $$;
 create or replace function public.es_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from perfiles where id = auth.uid() and activo and rol = 'admin');
+$$;
+
+create or replace function public.tiene_permiso(p text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from perfiles where id = auth.uid() and activo and (rol = 'admin' or p = any(permisos)));
 $$;
 
 -- Para la pantalla de inicio de sesión: si todavía no hay administradora,
@@ -282,7 +291,7 @@ create or replace function public.registrar_compra(proveedor text, items jsonb, 
 language plpgsql security definer set search_path = public as $$
 declare g uuid := gen_random_uuid();
 begin
-  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  if not tiene_permiso('recibir') then raise exception 'No tienes permiso para recibir mercadería'; end if;
   insert into movimientos (producto_id, tipo, cantidad, costo, proveedor, vence, grupo, usuario_id)
   select (i->>'producto_id')::uuid, 'compra', round((i->>'cantidad')::numeric, 3), (i->>'costo')::int,
          nullif(trim(registrar_compra.proveedor), ''), nullif(i->>'vence','')::date, g, auth.uid()
@@ -312,7 +321,7 @@ returns table (producto_id uuid, esperado numeric, contado numeric)
 language plpgsql security definer set search_path = public as $$
 declare i jsonb; pid uuid; q numeric; esp numeric; g uuid := gen_random_uuid();
 begin
-  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  if not tiene_permiso('contar') then raise exception 'No tienes permiso para contar'; end if;
   for i in select * from jsonb_array_elements(items) loop
     pid := (i->>'producto_id')::uuid;
     if i ? 'tiene' and jsonb_typeof(i->'tiene') = 'boolean' then
@@ -387,7 +396,7 @@ create or replace function public.resumen_caja() returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare d timestamptz; v jsonb; a jsonb; n int;
 begin
-  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  if not tiene_permiso('caja') then raise exception 'No tienes permiso para la caja'; end if;
   d := coalesce((select max(hasta) from cierres),
                 (hoy_chile()::timestamp at time zone 'America/Santiago'));
   select coalesce(jsonb_object_agg(medio, total), '{}'::jsonb) into v from (
@@ -454,7 +463,7 @@ create index if not exists reservas_dia on public.reservas (dia, creado);
 create or replace function public.info_reservas() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'tienda',      coalesce((select valor #>> '{}' from ajustes where clave = 'tienda_nombre'), 'Almacén'),
+    'tienda',      coalesce((select valor #>> '{}' from ajustes a where a.clave = 'tienda_nombre'), 'Almacén'),
     'abiertas',    coalesce((select (valor #>> '{}')::boolean from ajustes where clave = 'reservas_abiertas'), true),
     'hora_limite', coalesce((select (valor #>> '{}')::int from ajustes where clave = 'reservas_hora_limite'), 19),
     'hora_chile',  extract(hour from now() at time zone 'America/Santiago')::int,
@@ -578,20 +587,20 @@ create policy "admin cambia perfiles" on public.perfiles for update to authentic
   using (es_admin()) with check (es_admin());
 
 create policy "miembros ven productos"     on public.productos for select to authenticated using (es_miembro());
-create policy "miembros agregan productos" on public.productos for insert to authenticated with check (es_miembro());
-create policy "miembros editan productos"  on public.productos for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "miembros agregan productos" on public.productos for insert to authenticated with check (tiene_permiso('productos'));
+create policy "miembros editan productos"  on public.productos for update to authenticated using (tiene_permiso('productos')) with check (tiene_permiso('productos'));
 
 -- Los movimientos solo se crean con las funciones registrar_*; nadie los edita ni borra
 create policy "miembros ven movimientos" on public.movimientos for select to authenticated using (es_miembro());
 
 create policy "miembros ven clientes"     on public.clientes for select to authenticated using (es_miembro());
-create policy "miembros agregan clientes" on public.clientes for insert to authenticated with check (es_miembro());
-create policy "miembros editan clientes"  on public.clientes for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "miembros agregan clientes" on public.clientes for insert to authenticated with check (tiene_permiso('fiados'));
+create policy "miembros editan clientes"  on public.clientes for update to authenticated using (tiene_permiso('fiados')) with check (tiene_permiso('fiados'));
 create policy "admin borra clientes"      on public.clientes for delete to authenticated using (es_admin());
 
 create policy "miembros ven fiados"    on public.fiados for select to authenticated using (es_miembro());
 create policy "miembros anotan fiados" on public.fiados for insert to authenticated
-  with check (es_miembro() and usuario_id = auth.uid());
+  with check (tiene_permiso('fiados') and usuario_id = auth.uid());
 create policy "admin borra fiados"     on public.fiados for delete to authenticated using (es_admin());
 
 create policy "miembros ven ajustes"    on public.ajustes for select to authenticated using (es_miembro());
@@ -604,14 +613,14 @@ create policy "miembros ven reservas"     on public.reservas for select to authe
 create policy "miembros cambian reservas" on public.reservas for update to authenticated using (es_miembro()) with check (es_miembro());
 
 create policy "miembros ven proveedores"     on public.proveedores for select to authenticated using (es_miembro());
-create policy "miembros agregan proveedores" on public.proveedores for insert to authenticated with check (es_miembro());
-create policy "miembros editan proveedores"  on public.proveedores for update to authenticated using (es_miembro()) with check (es_miembro());
+create policy "miembros agregan proveedores" on public.proveedores for insert to authenticated with check (tiene_permiso('proveedores') or tiene_permiso('recibir'));
+create policy "miembros editan proveedores"  on public.proveedores for update to authenticated using (tiene_permiso('proveedores')) with check (tiene_permiso('proveedores'));
 create policy "admin borra proveedores"      on public.proveedores for delete to authenticated using (es_admin());
 
 create policy "miembros ven ofertas"     on public.ofertas for select to authenticated using (es_miembro());
-create policy "miembros agregan ofertas" on public.ofertas for insert to authenticated with check (es_miembro());
-create policy "miembros editan ofertas"  on public.ofertas for update to authenticated using (es_miembro()) with check (es_miembro());
-create policy "miembros borran ofertas"  on public.ofertas for delete to authenticated using (es_miembro());
+create policy "miembros agregan ofertas" on public.ofertas for insert to authenticated with check (tiene_permiso('ofertas'));
+create policy "miembros editan ofertas"  on public.ofertas for update to authenticated using (tiene_permiso('ofertas')) with check (tiene_permiso('ofertas'));
+create policy "miembros borran ofertas"  on public.ofertas for delete to authenticated using (tiene_permiso('ofertas'));
 
 -- Los cierres solo se crean con registrar_cierre y no se editan
 create policy "miembros ven cierres" on public.cierres for select to authenticated using (es_miembro());
@@ -623,7 +632,7 @@ create policy "miembros ven cierres" on public.cierres for select to authenticat
 create or replace function public.info_tienda() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'tienda',   coalesce((select valor #>> '{}' from ajustes where clave = 'tienda_nombre'), 'Almacén'),
+    'tienda',   coalesce((select valor #>> '{}' from ajustes a where a.clave = 'tienda_nombre'), 'Almacén'),
     'pagina',   coalesce((select valor from ajustes where clave = 'pagina'), '{}'::jsonb),
     'reservas', coalesce((select (valor #>> '{}')::boolean from ajustes where clave = 'reservas_abiertas'), true)
                 and coalesce((select (valor ->> 'pan')::boolean from ajustes where clave = 'extensiones'), true));
@@ -671,6 +680,67 @@ begin
   return res;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Producto sin precio o sin código: cualquier persona de la tienda lo completa al vender
+-- (aunque no tenga permiso para editar productos). Solo llena lo que falta.
+-- ---------------------------------------------------------------------
+create or replace function public.completar_producto(p_id uuid, p_codigo text default null, p_precio integer default null) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not es_miembro() then raise exception 'Sin permiso'; end if;
+  if nullif(trim(p_codigo), '') is not null and exists (select 1 from productos where codigo = trim(p_codigo) and id <> p_id) then
+    raise exception 'Ese código ya está asociado a otro producto';
+  end if;
+  update productos set
+    codigo = coalesce(codigo, nullif(trim(p_codigo), '')),
+    precio = case when precio = 0 and coalesce(p_precio, 0) > 0 then p_precio else precio end,
+    actualizado = now()
+  where id = p_id;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Respaldo automático: un trabajo programado (GitHub Actions) pide el respaldo con una
+-- clave larga y lo manda por correo. La clave la crea la administradora en Más > Respaldo;
+-- aquí solo se guarda su huella (sha256), nunca la clave.
+-- ---------------------------------------------------------------------
+create table if not exists public.respaldo_clave (
+  id     int primary key default 1 check (id = 1),
+  huella text not null,
+  creado timestamptz not null default now()
+);
+alter table public.respaldo_clave enable row level security;   -- sin políticas: solo por las funciones
+revoke all on public.respaldo_clave from anon, authenticated;
+
+create or replace function public.nueva_clave_respaldo() returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare k text := encode(gen_random_bytes(24), 'hex');
+begin
+  if not es_admin() then raise exception 'Solo la administradora puede crear la clave del respaldo'; end if;
+  insert into respaldo_clave (id, huella) values (1, encode(digest(k, 'sha256'), 'hex'))
+  on conflict (id) do update set huella = excluded.huella, creado = now();
+  return k;
+end $$;
+
+create or replace function public.hay_clave_respaldo() returns timestamptz
+language sql stable security definer set search_path = public as $$
+  select creado from respaldo_clave where es_admin();
+$$;
+
+create or replace function public.respaldo_automatico(clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare t text; arr jsonb; res jsonb := '{}'::jsonb;
+begin
+  if coalesce(length(clave), 0) < 32 or not exists (select 1 from respaldo_clave where huella = encode(digest(clave, 'sha256'), 'hex')) then
+    raise exception 'Clave de respaldo incorrecta';
+  end if;
+  foreach t in array array['productos','movimientos','clientes','fiados','reservas','panes','ajustes','perfiles','proveedores','ofertas','cierres'] loop
+    execute format('select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from public.%I x', t) into arr;
+    res := res || jsonb_build_object(t, arr);
+  end loop;
+  return jsonb_build_object('tienda', coalesce((select valor #>> '{}' from ajustes a where a.clave = 'tienda_nombre'), 'Almacén'),
+    'creado', now(), 'version', 1, 'automatico', true, 'tablas', res);
+end $$;
+
 -- Las funciones internas no se exponen a visitantes sin sesión
 revoke execute on function public.nuevo_perfil() from public, anon, authenticated;
 revoke execute on function public.cuidar_admins() from public, anon, authenticated;
@@ -682,6 +752,10 @@ revoke execute on function public.resumen_caja() from public, anon;
 revoke execute on function public.registrar_cierre(integer, jsonb, text) from public, anon;
 revoke execute on function public.restaurar_respaldo(jsonb) from public, anon;
 grant execute on function public.restaurar_respaldo(jsonb) to authenticated;
+revoke execute on function public.nueva_clave_respaldo(), public.hay_clave_respaldo(), public.completar_producto(uuid, text, integer) from public, anon;
+grant execute on function public.nueva_clave_respaldo(), public.hay_clave_respaldo(), public.completar_producto(uuid, text, integer) to authenticated;
+revoke execute on function public.respaldo_automatico(text) from public;
+grant execute on function public.respaldo_automatico(text) to anon, authenticated;
 revoke execute on function public.cambiar_acceso(uuid, text, text) from public, anon;
 revoke execute on function public.invitar(text), public.origen_peticion() from public, anon;
 grant execute on function public.invitar(text) to authenticated;
@@ -778,3 +852,6 @@ begin
     insert into public.ajustes (clave, valor) values ('pan_por_unidad', 'true');
   end if;
 end $$;
+
+-- Que la API vea al tiro las funciones nuevas
+notify pgrst, 'reload schema';
