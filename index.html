@@ -175,6 +175,8 @@ const RES_CUT_HOUR = 3;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const clp = n => "$" + Math.round(n).toLocaleString("es-CL");
+// Precio 0 = todavía sin precio: se fija la primera vez que se vende
+const precioTxt = p => p.price ? clp(p.price) + (p.unit === "kg" ? "/kg" : "") : "Sin precio";
 const uid = () => Math.random().toString(36).slice(2, 10);
 const uuid = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
@@ -182,7 +184,7 @@ const uuid = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000
 const DEMO_CAJA = { "Coca-Cola 1,5 L":6, "Coca-Cola 3 L":6, "Coca-Cola Zero 1,5 L":6, "Sprite 1,5 L":6, "Fanta 1,5 L":6, "Pepsi 1,5 L":6, "Agua mineral sin gas 1,6 L":6,
   "Jugo en caja naranja 1 L":12, "Néctar individual 200 ml":24, "Leche entera 1 L":12, "Leche descremada 1 L":12, "Yogur batido 125 g":24, "Arroz grado 2, 1 kg":10,
   "Fideos espirales 400 g":20, "Fideos spaghetti 400 g":20, "Azúcar 1 kg":10, "Aceite maravilla 1 L":12 };
-const SECTORS = ["Pan","Verduras","Bebidas","Jugos","Lácteos","Abarrotes","Legumbres","Galletas","Conservas","Snacks","Aseo"];
+const SECTORS = ["Pan","Verduras","Bebidas","Jugos","Lácteos","Abarrotes","Legumbres","Galletas","Conservas","Snacks","Dulces","Helados","Mascotas","Aseo"];
 
 // Catálogo precargado típico de almacén: [nombre, sector, precio venta, costo, popularidad 0-3, unidad, botón rápido, se reserva]
 // unidad "kg" = a granel: el precio es por kilo y se vende por peso o por monto
@@ -684,6 +686,13 @@ const act = {
     if (!isDB()){ save(); return; }
     clearTimeout(act._pm); act._pm = setTimeout(() => act.setting("mensaje_pan", text).catch(e => toast(friendly(e))), 700);
   },
+  // Asocia varios productos a un proveedor (o los suelta con provId null)
+  async setProv(ids, provId){
+    if (!ids.length) return;
+    if (!isDB()){ ids.forEach(id => { const p = P(id); if (p) p.provId = provId; }); save(); return; }
+    await q(sb.from("productos").update({ proveedor_id:provId, actualizado:new Date().toISOString() }).in("id", ids));
+    await fetchProducts(ids);
+  },
   async saveProv(v, f){
     if (!isDB()){ if (v) Object.assign(v, f); else S.proveedores.push(v = { id:"v"+uid(), ...f }); save(); return v; }
     const cols = { nombre:f.name, telefono:f.phone, nota:f.note };
@@ -821,6 +830,37 @@ function handleCode(code, cb){
   if (p){ closeModal(); cb(p); return; }
   openAssociate(code, cb);
 }
+// Qué hace un código escaneado en cada pantalla (cámara o pistola)
+function scanAction(){
+  const v = ui.view;
+  if (v === "vender" || v === "inicio") return p => { if (ui.view !== "vender") go("vender"); addToCart(p, true); };
+  if (v === "recibir") return p => addToRecv(p);
+  if (v === "contar" && ui.sector) return p => {
+    if (p.cat !== ui.sector) toast(`${p.name} es del sector ${p.cat}; se suma igual`); else toast(`+1 ${p.name}`);
+    const d = (ui.draft[p.id] ||= {}); d.qty = String(r3((parseFloat(d.qty)||0) + 1)); d.none = false; render(); };
+  if (v === "productos") return p => openProduct(p);
+  return null;
+}
+// Pistola de códigos (USB o Bluetooth): escribe el número muy rápido y termina con Enter.
+// Se reconoce por la velocidad, así que funciona sin tocar nada en pantalla.
+const wedge = { buf:"", t:0 };
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter"){
+    const code = wedge.buf, fast = e.timeStamp - wedge.t < 100; wedge.buf = "";
+    if (!fast || code.length < 6) return;
+    const t = e.target, sheet = ui.scanCb;
+    // En un campo de código de barras el número se queda escrito ahí
+    if (!sheet && t && t.classList && t.classList.contains("code")) return;
+    e.preventDefault(); e.stopPropagation();
+    // Lo que la pistola alcanzó a escribir en otro campo se borra (para que no quede como precio o búsqueda)
+    if (t && t.tagName === "INPUT" && t.value.endsWith(code)){ t.value = t.value.slice(0, -code.length); t.dispatchEvent(new Event("input", { bubbles:true })); }
+    const cb = sheet || ($("#modalroot").innerHTML ? null : scanAction());
+    if (cb) handleCode(code, cb); else toast($("#modalroot").innerHTML ? "Cierra esta ventana para escanear" : "Para escanear, abre Vender, Recibir o Contar");
+  } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey){
+    if (e.timeStamp - wedge.t > 50) wedge.buf = "";
+    wedge.buf += e.key; wedge.t = e.timeStamp;
+  }
+}, true);
 function openScanSheet(cb, error){
   openModal(`<div class="stack">
     <div class="spread"><h2>Escanear producto</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
@@ -835,6 +875,7 @@ function openScanSheet(cb, error){
     ${isDB() ? "" : `<div class="field"><label>Para probar la demo sin cámara</label>
       <div class="row"><button class="btn sm" data-code="7800000000011">Coca-Cola 1,5 L</button><button class="btn sm" data-code="7800000000028">Coca-Cola 3 L</button><button class="btn sm" data-code="7801234000099">Código nuevo</button></div></div>`}
   </div>`);
+  ui.scanCb = cb;
   if (!error) startLive(cb); else { const n = $("#liveNote"); if (n && !live) n.hidden = true; }
   $("#scanCam").onchange = e => { stopLive(); handleFile(e.target, cb); };
   $("#scanPick").onchange = e => handleFile(e.target, cb);
@@ -863,11 +904,11 @@ function openAssociate(code, cb){
 
 // ---------- Modal ----------
 function openModal(html){
-  stopLive();
+  stopLive(); ui.scanCb = null;
   $("#modalroot").innerHTML = `<div class="overlay" id="ov"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
   $("#ov").addEventListener("click", e => { if (e.target.id === "ov" || e.target.hasAttribute("data-close")) closeModal(); });
 }
-function closeModal(){ stopLive(); $("#modalroot").innerHTML = ""; }
+function closeModal(){ stopLive(); ui.scanCb = null; $("#modalroot").innerHTML = ""; }
 
 // ---------- Medios de pago, extensiones, tema y ofertas ----------
 const MEDIOS = [["efectivo","Efectivo"],["debito","Débito"],["transferencia","Transferencia"]];
@@ -1034,7 +1075,7 @@ function searchResults(q, onPick, opts){
   q = q.trim().toLowerCase();
   if (!q) return "";
   const res = S.products.filter(p => (opts?.all || p.has) && (p.name.toLowerCase().includes(q) || p.barcode === q)).slice(0, 8);
-  return res.map(p => `<button class="item tap" data-pick="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${clp(p.price)}${isKg(p) ? "/kg" : ""} · ${esc(p.cat)}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados para “${esc(q)}”.</div>`;
+  return res.map(p => `<button class="item tap" data-pick="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${precioTxt(p)} · ${esc(p.cat)}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados para “${esc(q)}”.</div>`;
 }
 
 function viewVender(){
@@ -1044,7 +1085,7 @@ function viewVender(){
   <div class="stack">
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto, ej: coca" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
-    ${quick.length ? `<div class="quick">${quick.map(p => `<button class="qbtn" data-quick="${p.id}">${p.cat === "Pan" ? ICONS.pan : ""}<span><b>${esc(p.name)}</b><small>${clp(p.price)}${isKg(p) ? "/kg" : ""}</small></span></button>`).join("")}</div>` : ""}
+    ${quick.length ? `<div class="quick">${quick.map(p => `<button class="qbtn" data-quick="${p.id}">${p.cat === "Pan" ? ICONS.pan : ""}<span><b>${esc(p.name)}</b><small>${precioTxt(p)}</small></span></button>`).join("")}</div>` : ""}
     <div class="card">
       <h3>Venta actual</h3>
       ${lines.length ? lines.map((l,i) => { const p = P(l.pid);
@@ -1068,7 +1109,26 @@ function viewVender(){
     <button class="btn primary block" id="confirm" ${ui.cart.length?"":"disabled"}>Confirmar venta${caja && lines.length ? " · " + medioName(ui.medio) : ""}</button>
   </div>`;
 }
-function addToCart(p){ if (isKg(p)) return openGranel(p); const l = ui.cart.find(l => l.pid === p.id); if (l) l.qty++; else ui.cart.push({ pid:p.id, qty:1 }); render(); }
+function addToCart(p, say){
+  if (!p.price) return askPrice(p, q => addToCart(q, say));
+  if (isKg(p)) return openGranel(p);
+  const l = ui.cart.find(l => l.pid === p.id); if (l) l.qty++; else ui.cart.push({ pid:p.id, qty:1 }); render();
+  if (say) toast(`+1 ${p.name}`);
+}
+// Producto sin precio: se fija al venderlo y queda guardado (junto con el código si se acaba de escanear)
+function askPrice(p, then){
+  const kg = isKg(p);
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(p.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <p style="margin:0">Este producto todavía no tiene precio. Escríbelo una vez y queda guardado para las próximas ventas.</p>
+    <div class="field"><label for="apv">${kg ? "Precio por kilo" : "Precio de venta"}</label><input class="input" id="apv" type="number" inputmode="numeric" min="1" placeholder="Ej: 1500"></div>
+    <button class="btn primary block" id="apok">Guardar precio${ui.view === "vender" ? " y vender" : ""}</button>
+  </div>`);
+  const i = $("#apv"); i.focus();
+  const ok = () => run(async () => { const v = Math.round(+i.value || 0); if (v <= 0){ i.focus(); return; }
+    const q = await act.updateProduct(p, { price:v }); closeModal(); toast(`Precio de ${q.name}: ${clp(v)}${kg ? "/kg" : ""}`); then(q); });
+  $("#apok").onclick = ok; i.onkeydown = e => { if (e.key === "Enter") ok(); };
+}
 // Venta a granel: por peso (kilos) o por monto ("$1.000 de pan")
 function openGranel(p, idx){
   const cur = idx != null ? ui.cart[idx] : null;
@@ -1111,6 +1171,7 @@ function viewRecibir(){
       <span class="small muted">Una distribuidora nueva queda guardada al guardar la recepción.</span></div>
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto recibido" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
+    ${provPicks()}
     <div class="card">
       <h3>Productos recibidos</h3>
       ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:1fr 80px 96px"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
@@ -1125,6 +1186,15 @@ function viewRecibir(){
     ${venc ? `<p class="small muted" style="margin:0">Anota la fecha de vencimiento de lo perecible (lácteos, cecinas, pan envasado) y la app avisa en Inicio lo que vence esta semana.</p>` : ""}
     <button class="btn primary block" id="confirm" ${ui.recv.items.length?"":"disabled"}>Guardar recepción</button>
   </div>`;
+}
+// Al elegir un proveedor aparecen sus productos para tocarlos sin buscar
+function provPicks(){
+  const v = provById(ui.recv.provId); if (!v) return "";
+  const ps = S.products.filter(p => p.provId === v.id).sort((a,b) => a.name.localeCompare(b.name));
+  return `<div class="card stack" style="gap:8px"><div class="spread"><h3>Productos de ${esc(v.name)}</h3><button class="btn ghost sm" id="rpick">${ps.length ? "Editar" : "+ Asociar"}</button></div>
+    ${ps.length ? `<div class="chips" style="flex-wrap:wrap">${ps.map(p => `<button class="chip" data-radd="${p.id}" aria-pressed="${ui.recv.items.some(l => l.pid === p.id)}">${esc(p.name)}</button>`).join("")}</div>
+      <span class="small muted">Toca los que llegaron y se agregan abajo.</span>`
+      : `<span class="small muted">Este proveedor todavía no tiene productos asociados. Asócialos una vez y aparecen aquí cada vez que te traiga mercadería.</span>`}</div>`;
 }
 function addToRecv(p){ const l = ui.recv.items.find(l => l.pid === p.id); if (l) l.qty++;
   else if (p.porCaja && !isKg(p)) ui.recv.items.push({ pid:p.id, box:true, n:p.porCaja, qty:1, cost:p.cost * p.porCaja });
@@ -1175,12 +1245,12 @@ function finishCount(){ run(async () => {
 
 function viewProductos(){
   const q = ui.prodQuery.toLowerCase();
-  const list = S.products.filter(p => (ui.prodFilter==="Todos" || p.cat===ui.prodFilter) && p.name.toLowerCase().includes(q));
+  const f = ui.prodFilter, list = S.products.filter(p => (f==="Todos" || (f==="Sin precio" ? !p.price : p.cat===f)) && (p.name.toLowerCase().includes(q) || p.barcode === q.trim()));
   return `${header("Productos", `${S.products.filter(p=>p.has).length} productos en el catálogo`)}
   <div class="stack">
     <div class="searchbar"><input class="input" id="pq" placeholder="Buscar" value="${esc(ui.prodQuery)}"><button class="btn primary" id="addp">+ Agregar</button></div>
-    <div class="chips">${["Todos",...SECTORS].map(c => `<button class="chip" data-f="${esc(c)}" aria-pressed="${ui.prodFilter===c}">${esc(c)}</button>`).join("")}</div>
-    <div class="card" style="padding-block:0"><div class="list" id="plist">${list.map(p => `<button class="item tap" data-open="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${clp(p.price)}${isKg(p) ? "/kg" : ""} · ${esc(p.cat)}${p.barcode?" · con código":""}${p.atajo ? " · botón rápido" : ""}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados.</div>`}</div></div>
+    <div class="chips">${["Todos",...SECTORS,"Sin precio"].map(c => `<button class="chip" data-f="${esc(c)}" aria-pressed="${ui.prodFilter===c}">${esc(c)}</button>`).join("")}</div>
+    <div class="card" style="padding-block:0"><div class="list" id="plist">${list.map(p => `<button class="item tap" data-open="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${precioTxt(p)} · ${esc(p.cat)}${p.barcode?" · con código":""}${p.atajo ? " · botón rápido" : ""}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados.</div>`}</div></div>
     <p class="small muted" style="margin:0">El catálogo viene precargado con productos típicos de almacén. Los nombres y precios se ajustan a lo que vende la tienda.</p>
   </div>`;
 }
@@ -1700,11 +1770,42 @@ function openProv(v){
     <div class="field"><label for="vo">Nota</label><input class="input" id="vo" value="${esc(v?.note || "")}" placeholder="Ej: pasa los martes, pedido mínimo $50.000"></div>
     <button class="btn primary block" id="vsave">Guardar</button>
     ${v && prods.length ? `<button class="btn block" id="vcost">Ver lo que cuesta cada producto</button>` : ""}
-    ${v ? `<div><h3>Sus productos (${prods.length})</h3><p class="small muted" style="margin:4px 0 0">${prods.length ? esc(prods.map(p => p.name).join(", ")) : "Ninguno todavía. Se asigna en cada producto o al recibir mercadería de este proveedor."}</p></div>` : ""}
+    ${v ? `<div class="stack" style="gap:8px"><div class="spread"><h3>Sus productos (${prods.length})</h3><button class="btn sm" id="vpick">+ Asociar productos</button></div>
+      ${prods.length ? `<div class="card" style="padding-block:0"><div class="list">${prods.sort((a,b) => a.name.localeCompare(b.name)).map(p => `<div class="item"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}</div></div><button class="btn ghost sm" data-vdel="${p.id}" aria-label="Quitar ${esc(p.name)} de este proveedor">Quitar</button></div>`).join("")}</div></div>`
+        : `<p class="small muted" style="margin:0">Ninguno todavía. Asócialos aquí y al recibir mercadería de este proveedor aparecen listos para elegir.</p>`}</div>` : ""}
   </div>`);
+  if ($("#vpick")) $("#vpick").onclick = () => openProvPick(v);
+  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => run(async () => { await act.setProv([b.dataset.vdel], null); openProv(v); render(); }));
   if ($("#vcost")) $("#vcost").onclick = () => { closeModal(); ui.costProv = v.id; go("costos"); };
   $("#vsave").onclick = () => run(async () => { const name = $("#vn").value.trim(); if (!name) return $("#vn").focus();
     await act.saveProv(v, { name, phone:$("#vp").value.trim(), note:$("#vo").value.trim() }); closeModal(); render(); toast("Proveedor guardado"); });
+}
+
+// Elegir de una vez los productos que trae un proveedor
+function openProvPick(v, fromRecv){
+  const sel = new Set(S.products.filter(p => p.provId === v.id).map(p => p.id)), orig = new Set(sel);
+  let q = "", cat = "Todos";
+  const cats = ["Todos", ...SECTORS.filter(c => S.products.some(p => p.cat === c && p.has))];
+  const list = () => S.products.filter(p => (p.has || sel.has(p.id)) && (cat === "Todos" || p.cat === cat) && p.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b) => a.name.localeCompare(b.name)).slice(0, 150).map(p => { const otro = p.provId && p.provId !== v.id ? provById(p.provId) : null;
+      return `<label class="item tap"><input type="checkbox" data-vp="${p.id}" ${sel.has(p.id) ? "checked" : ""} style="width:20px;height:20px"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}${otro ? " · ahora de " + esc(otro.name) : ""}</div></div></label>`; }).join("") || `<div class="empty">Sin resultados.</div>`;
+  openModal(`<div class="stack">
+    <div class="spread"><h2>Productos de ${esc(v.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <input class="input" id="vpq" placeholder="Buscar, ej: coca" autocomplete="off">
+    <div class="chips" style="flex-wrap:wrap">${cats.map(c => `<button class="chip" data-vpc="${esc(c)}" aria-pressed="${c === cat}">${esc(c)}</button>`).join("")}</div>
+    <div class="card" style="padding-block:0;max-height:50vh;overflow:auto"><div class="list" id="vplist">${list()}</div></div>
+    <p class="small muted" style="margin:0">Cada producto queda con un solo proveedor: si ya era de otro, pasa a ${esc(v.name)}.</p>
+    <button class="btn primary block" id="vpsave">Guardar (<span id="vpn">${sel.size}</span>)</button>
+  </div>`);
+  const bind = () => document.querySelectorAll("[data-vp]").forEach(i => i.onchange = () => { i.checked ? sel.add(i.dataset.vp) : sel.delete(i.dataset.vp); $("#vpn").textContent = sel.size; });
+  const redraw = () => { $("#vplist").innerHTML = list(); bind(); };
+  bind();
+  $("#vpq").oninput = e => { q = e.target.value; redraw(); };
+  document.querySelectorAll("[data-vpc]").forEach(b => b.onclick = () => { cat = b.dataset.vpc; document.querySelectorAll("[data-vpc]").forEach(x => x.setAttribute("aria-pressed", x === b)); redraw(); });
+  $("#vpsave").onclick = () => run(async () => {
+    await act.setProv([...sel].filter(id => !orig.has(id)), v.id);
+    await act.setProv([...orig].filter(id => !sel.has(id)), null);
+    toast(`${sel.size} productos de ${v.name}`); if (fromRecv) closeModal(); else openProv(provById(v.id)); render(); });
 }
 
 // ---------- Costos por proveedor: cuánto cuesta cada producto por unidad y por caja ----------
@@ -2075,8 +2176,8 @@ function render(){
   }
   if (v === "vender"){
     bindSearch(addToCart);
-    $("#scan").onclick = () => openScanSheet(p => { addToCart(p); if (!isKg(p)) toast(`+1 ${p.name}`); });
-    app.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => { const p = P(b.dataset.quick); addToCart(p); if (!isKg(p)) toast(`+1 ${p.name}`); });
+    $("#scan").onclick = () => openScanSheet(scanAction());
+    app.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => addToCart(P(b.dataset.quick), true));
     app.querySelectorAll("[data-gedit]").forEach(b => b.onclick = () => { const i = +b.dataset.gedit; openGranel(P(ui.cart[i].pid), i); });
     app.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { ui.cart[b.dataset.inc].qty++; render(); });
     app.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const l = ui.cart[b.dataset.dec]; if (--l.qty <= 0) ui.cart.splice(b.dataset.dec,1); render(); });
@@ -2093,10 +2194,13 @@ function render(){
     bindSearch(addToRecv);
     $("#sup").oninput = e => { ui.recv.supplier = e.target.value; const n = e.target.value.trim().toLowerCase();
       ui.recv.provId = (S.proveedores || []).find(v => v.name.toLowerCase() === n)?.id || null; };
+    $("#sup").onchange = () => softRender();
     app.querySelectorAll("[data-rprov]").forEach(b => b.onclick = () => { const p = provById(b.dataset.rprov);
       ui.recv.provId = p.id; ui.recv.supplier = p.name; softRender(); });
     app.querySelectorAll("[data-rv]").forEach(i => i.onchange = () => { ui.recv.items[i.dataset.rv].vence = i.value; });
-    $("#scan").onclick = () => openScanSheet(p => addToRecv(p));
+    $("#scan").onclick = () => openScanSheet(scanAction());
+    app.querySelectorAll("[data-radd]").forEach(b => b.onclick = () => addToRecv(P(b.dataset.radd)));
+    if ($("#rpick")) $("#rpick").onclick = () => openProvPick(provById(ui.recv.provId), true);
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
@@ -2120,9 +2224,7 @@ function render(){
       app.querySelectorAll("[data-cq]").forEach(i => i.oninput = () => { (ui.draft[i.dataset.cq] ||= {}).qty = i.value; });
       app.querySelectorAll("[data-ce]").forEach(i => i.onchange = () => { (ui.draft[i.dataset.ce] ||= {}).est = i.checked; });
       app.querySelectorAll("[data-cn]").forEach(b => b.onclick = () => { const p = P(b.dataset.cn); const d = (ui.draft[p.id] ||= {}); const off = d.none ?? !p.has; d.none = !off; render(); });
-      $("#scan").onclick = () => openScanSheet(p => {
-        if (p.cat !== ui.sector) toast(`${p.name} es del sector ${p.cat}; se suma igual`); else toast(`+1 ${p.name}`);
-        const d = (ui.draft[p.id] ||= {}); d.qty = String(r3((parseFloat(d.qty)||0) + 1)); d.none = false; render(); });
+      $("#scan").onclick = () => openScanSheet(scanAction());
       $("#addp").onclick = () => openProductForm(ui.sector, "", () => render());
       $("#finish").onclick = finishCount;
     }
@@ -2131,7 +2233,7 @@ function render(){
     $("#pq").oninput = e => { ui.prodQuery = e.target.value; const pos = e.target.selectionStart; render(); const n = $("#pq"); n.focus(); n.setSelectionRange(pos,pos); };
     app.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { ui.prodFilter = b.dataset.f; render(); });
     app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => openProduct(P(b.dataset.open)));
-    $("#addp").onclick = () => openProductForm(ui.prodFilter==="Todos" ? null : ui.prodFilter, "", null);
+    $("#addp").onclick = () => openProductForm(SECTORS.includes(ui.prodFilter) ? ui.prodFilter : null, "", null);
   }
   if (v === "historial"){
     app.querySelectorAll("[data-hf]").forEach(b => b.onclick = () => { ui.histFilter = b.dataset.hf; render(); });

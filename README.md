@@ -48,7 +48,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Vencimientos:** aviso de lo que vence esta semana o ya venció, para venderlo antes o rebajarlo con una oferta.
 - **Cierre de caja:** compara lo registrado desde el último cierre con lo contado en caja, separado en efectivo (con el sencillo inicial), débito y transferencia, y guarda el historial de cierres.
 - **Conteo por sectores:** se cuenta un sector a la vez; una cantidad se puede marcar como aproximada o un producto como "No lo tenemos". Al terminar muestra las diferencias entre lo que esperaba el sistema y lo contado.
-- **Productos:** catálogo precargado con 67 productos típicos de almacén en 11 sectores (incluidos pan por unidad y verduras a granel), con filtro, búsqueda, edición (nombre, precio, costo, stock mínimo, código de barras), últimos movimientos y alta de productos nuevos.
+- **Productos:** catálogo precargado con 67 productos típicos de almacén en 14 sectores (incluidos pan por unidad y verduras a granel), con filtro, búsqueda, edición (nombre, precio, costo, stock mínimo, código de barras), últimos movimientos y alta de productos nuevos.
 - **Historial** de ventas, compras y conteos, con filtro por tipo.
 - **Panel de inicio:** porcentaje del inventario contado, ventas del día, avance del conteo por sector, productos bajo el stock mínimo y lo más vendido en los últimos 7 días.
 
@@ -57,6 +57,8 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - Usa la API nativa **`BarcodeDetector`** cuando el navegador la ofrece y **ZXing** como respaldo cuando no.
 - Alternativas: sacar una foto al código, elegir una foto guardada o escribir el número a mano.
 - Si un código no existe, se puede asociar a un producto del catálogo o crear uno nuevo; desde ahí se reconoce solo.
+- Funciona también con pistola de códigos USB o Bluetooth: en Vender, Recibir, Contar o Productos basta con disparar, sin tocar la pantalla.
+- Un producto sin precio pide el precio la primera vez que se vende y lo deja guardado junto con su código.
 
 **Fiados**
 - Cuaderno de cuentas por cliente: anotar fiados, registrar pagos y ver saldo y movimientos.
@@ -130,7 +132,8 @@ Inventario_almacen_VD/
 ├── manifest.webmanifest, sw.js, icons/   # Instalación como app
 ├── config.js         # URL y clave pública de Supabase (vacío = modo demo)
 ├── supabase/
-│   └── schema.sql    # Tablas, permisos (RLS), funciones y catálogo inicial
+│   ├── schema.sql    # Tablas, permisos (RLS), funciones y catálogo inicial
+│   └── catalogo_emporio.sql  # Catálogo real de una tienda (se corre una vez, sin precios)
 ├── docs/
 │   ├── SUPABASE.md   # Guía para conectar la base de datos
 │   └── capturas/     # Imágenes usadas en este README
