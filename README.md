@@ -65,7 +65,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 
 **Aviso y reservas de pan**
 - Botón **"Avisar que llegó el pan"** que abre WhatsApp con el mensaje listo para enviarlo al grupo de clientes. El mensaje se puede editar o copiar y queda guardado.
-- **Reservas de pan** desde una página pública (`reservar.html`): el cliente elige el pan, si es para hoy o mañana, y recibe un código. En la tienda aparece al instante, con el total de pan a apartar, y se marca como entregada o se avisa por WhatsApp que está lista.
+- **Reservas de pan** desde una página pública (`reservar.html`): el cliente elige el pan, si es para hoy o mañana, y retira diciendo su nombre. En la tienda aparece al instante, con el total de pan a apartar, y se marca como entregada o se avisa por WhatsApp que está lista.
 
 **Página de la tienda (`tienda.html`)**
 - Página pública para clientes al estilo "link en bio": foto, nombre, descripción, dirección, horario y botones grandes (reservar pan, reseña en Google, grupo de WhatsApp, cómo llegar, redes sociales).
