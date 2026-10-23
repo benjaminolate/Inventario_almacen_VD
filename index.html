@@ -686,6 +686,13 @@ const act = {
     if (!isDB()){ save(); return; }
     clearTimeout(act._pm); act._pm = setTimeout(() => act.setting("mensaje_pan", text).catch(e => toast(friendly(e))), 700);
   },
+  // Asocia varios productos a un proveedor (o los suelta con provId null)
+  async setProv(ids, provId){
+    if (!ids.length) return;
+    if (!isDB()){ ids.forEach(id => { const p = P(id); if (p) p.provId = provId; }); save(); return; }
+    await q(sb.from("productos").update({ proveedor_id:provId, actualizado:new Date().toISOString() }).in("id", ids));
+    await fetchProducts(ids);
+  },
   async saveProv(v, f){
     if (!isDB()){ if (v) Object.assign(v, f); else S.proveedores.push(v = { id:"v"+uid(), ...f }); save(); return v; }
     const cols = { nombre:f.name, telefono:f.phone, nota:f.note };
@@ -1164,6 +1171,7 @@ function viewRecibir(){
       <span class="small muted">Una distribuidora nueva queda guardada al guardar la recepción.</span></div>
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto recibido" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
+    ${provPicks()}
     <div class="card">
       <h3>Productos recibidos</h3>
       ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:1fr 80px 96px"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
@@ -1178,6 +1186,15 @@ function viewRecibir(){
     ${venc ? `<p class="small muted" style="margin:0">Anota la fecha de vencimiento de lo perecible (lácteos, cecinas, pan envasado) y la app avisa en Inicio lo que vence esta semana.</p>` : ""}
     <button class="btn primary block" id="confirm" ${ui.recv.items.length?"":"disabled"}>Guardar recepción</button>
   </div>`;
+}
+// Al elegir un proveedor aparecen sus productos para tocarlos sin buscar
+function provPicks(){
+  const v = provById(ui.recv.provId); if (!v) return "";
+  const ps = S.products.filter(p => p.provId === v.id).sort((a,b) => a.name.localeCompare(b.name));
+  return `<div class="card stack" style="gap:8px"><div class="spread"><h3>Productos de ${esc(v.name)}</h3><button class="btn ghost sm" id="rpick">${ps.length ? "Editar" : "+ Asociar"}</button></div>
+    ${ps.length ? `<div class="chips" style="flex-wrap:wrap">${ps.map(p => `<button class="chip" data-radd="${p.id}" aria-pressed="${ui.recv.items.some(l => l.pid === p.id)}">${esc(p.name)}</button>`).join("")}</div>
+      <span class="small muted">Toca los que llegaron y se agregan abajo.</span>`
+      : `<span class="small muted">Este proveedor todavía no tiene productos asociados. Asócialos una vez y aparecen aquí cada vez que te traiga mercadería.</span>`}</div>`;
 }
 function addToRecv(p){ const l = ui.recv.items.find(l => l.pid === p.id); if (l) l.qty++;
   else if (p.porCaja && !isKg(p)) ui.recv.items.push({ pid:p.id, box:true, n:p.porCaja, qty:1, cost:p.cost * p.porCaja });
@@ -1753,11 +1770,42 @@ function openProv(v){
     <div class="field"><label for="vo">Nota</label><input class="input" id="vo" value="${esc(v?.note || "")}" placeholder="Ej: pasa los martes, pedido mínimo $50.000"></div>
     <button class="btn primary block" id="vsave">Guardar</button>
     ${v && prods.length ? `<button class="btn block" id="vcost">Ver lo que cuesta cada producto</button>` : ""}
-    ${v ? `<div><h3>Sus productos (${prods.length})</h3><p class="small muted" style="margin:4px 0 0">${prods.length ? esc(prods.map(p => p.name).join(", ")) : "Ninguno todavía. Se asigna en cada producto o al recibir mercadería de este proveedor."}</p></div>` : ""}
+    ${v ? `<div class="stack" style="gap:8px"><div class="spread"><h3>Sus productos (${prods.length})</h3><button class="btn sm" id="vpick">+ Asociar productos</button></div>
+      ${prods.length ? `<div class="card" style="padding-block:0"><div class="list">${prods.sort((a,b) => a.name.localeCompare(b.name)).map(p => `<div class="item"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}</div></div><button class="btn ghost sm" data-vdel="${p.id}" aria-label="Quitar ${esc(p.name)} de este proveedor">Quitar</button></div>`).join("")}</div></div>`
+        : `<p class="small muted" style="margin:0">Ninguno todavía. Asócialos aquí y al recibir mercadería de este proveedor aparecen listos para elegir.</p>`}</div>` : ""}
   </div>`);
+  if ($("#vpick")) $("#vpick").onclick = () => openProvPick(v);
+  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => run(async () => { await act.setProv([b.dataset.vdel], null); openProv(v); render(); }));
   if ($("#vcost")) $("#vcost").onclick = () => { closeModal(); ui.costProv = v.id; go("costos"); };
   $("#vsave").onclick = () => run(async () => { const name = $("#vn").value.trim(); if (!name) return $("#vn").focus();
     await act.saveProv(v, { name, phone:$("#vp").value.trim(), note:$("#vo").value.trim() }); closeModal(); render(); toast("Proveedor guardado"); });
+}
+
+// Elegir de una vez los productos que trae un proveedor
+function openProvPick(v, fromRecv){
+  const sel = new Set(S.products.filter(p => p.provId === v.id).map(p => p.id)), orig = new Set(sel);
+  let q = "", cat = "Todos";
+  const cats = ["Todos", ...SECTORS.filter(c => S.products.some(p => p.cat === c && p.has))];
+  const list = () => S.products.filter(p => (p.has || sel.has(p.id)) && (cat === "Todos" || p.cat === cat) && p.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b) => a.name.localeCompare(b.name)).slice(0, 150).map(p => { const otro = p.provId && p.provId !== v.id ? provById(p.provId) : null;
+      return `<label class="item tap"><input type="checkbox" data-vp="${p.id}" ${sel.has(p.id) ? "checked" : ""} style="width:20px;height:20px"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}${otro ? " · ahora de " + esc(otro.name) : ""}</div></div></label>`; }).join("") || `<div class="empty">Sin resultados.</div>`;
+  openModal(`<div class="stack">
+    <div class="spread"><h2>Productos de ${esc(v.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <input class="input" id="vpq" placeholder="Buscar, ej: coca" autocomplete="off">
+    <div class="chips" style="flex-wrap:wrap">${cats.map(c => `<button class="chip" data-vpc="${esc(c)}" aria-pressed="${c === cat}">${esc(c)}</button>`).join("")}</div>
+    <div class="card" style="padding-block:0;max-height:50vh;overflow:auto"><div class="list" id="vplist">${list()}</div></div>
+    <p class="small muted" style="margin:0">Cada producto queda con un solo proveedor: si ya era de otro, pasa a ${esc(v.name)}.</p>
+    <button class="btn primary block" id="vpsave">Guardar (<span id="vpn">${sel.size}</span>)</button>
+  </div>`);
+  const bind = () => document.querySelectorAll("[data-vp]").forEach(i => i.onchange = () => { i.checked ? sel.add(i.dataset.vp) : sel.delete(i.dataset.vp); $("#vpn").textContent = sel.size; });
+  const redraw = () => { $("#vplist").innerHTML = list(); bind(); };
+  bind();
+  $("#vpq").oninput = e => { q = e.target.value; redraw(); };
+  document.querySelectorAll("[data-vpc]").forEach(b => b.onclick = () => { cat = b.dataset.vpc; document.querySelectorAll("[data-vpc]").forEach(x => x.setAttribute("aria-pressed", x === b)); redraw(); });
+  $("#vpsave").onclick = () => run(async () => {
+    await act.setProv([...sel].filter(id => !orig.has(id)), v.id);
+    await act.setProv([...orig].filter(id => !sel.has(id)), null);
+    toast(`${sel.size} productos de ${v.name}`); if (fromRecv) closeModal(); else openProv(provById(v.id)); render(); });
 }
 
 // ---------- Costos por proveedor: cuánto cuesta cada producto por unidad y por caja ----------
@@ -2146,10 +2194,13 @@ function render(){
     bindSearch(addToRecv);
     $("#sup").oninput = e => { ui.recv.supplier = e.target.value; const n = e.target.value.trim().toLowerCase();
       ui.recv.provId = (S.proveedores || []).find(v => v.name.toLowerCase() === n)?.id || null; };
+    $("#sup").onchange = () => softRender();
     app.querySelectorAll("[data-rprov]").forEach(b => b.onclick = () => { const p = provById(b.dataset.rprov);
       ui.recv.provId = p.id; ui.recv.supplier = p.name; softRender(); });
     app.querySelectorAll("[data-rv]").forEach(i => i.onchange = () => { ui.recv.items[i.dataset.rv].vence = i.value; });
     $("#scan").onclick = () => openScanSheet(scanAction());
+    app.querySelectorAll("[data-radd]").forEach(b => b.onclick = () => addToRecv(P(b.dataset.radd)));
+    if ($("#rpick")) $("#rpick").onclick = () => openProvPick(provById(ui.recv.provId), true);
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
