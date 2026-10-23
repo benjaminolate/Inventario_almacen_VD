@@ -41,7 +41,8 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Tipos de pan:** cada pan con su precio por unidad, botón rápido en Vender y opción de reservarlo.
 - **Venta a granel:** verduras con precio por kilo; se venden por peso (lo que marca la balanza) o por monto ("$1.000 de pan").
 - **Ofertas y packs:** por ejemplo "3 galletas por $1.500"; el descuento se aplica solo en el carrito al juntar las unidades, y avisa cuando falta poco para completar el pack.
-- **Recepción de mercadería:** registro de lo que llega del proveedor, con cantidad, costo unitario, fecha de vencimiento opcional y total de la factura.
+- **Recepción de mercadería:** registro de lo que llega del proveedor, por unidad o **por caja** (cantidad de cajas y precio de la caja; la app lo pasa a unidades), con fecha de vencimiento opcional y total de la factura.
+- **Costos por proveedor:** lo que cuesta cada producto por unidad y por caja, el precio de venta y cuánto se gana, filtrado por proveedor.
 - **Lista de compras:** se arma sola con los productos bajo el stock mínimo, separada por proveedor, con cantidades sugeridas, pedido por WhatsApp y un botón para recibir ese pedido.
 - **Proveedores:** contacto, notas y productos de cada uno.
 - **Vencimientos:** aviso de lo que vence esta semana o ya venció, para venderlo antes o rebajarlo con una oferta.
@@ -76,7 +77,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - El historial registra quién hizo cada movimiento, con la hora del servidor.
 
 **Otros**
-- Diseño pensado para celular. **Más** separa Logística, Ayudas y Configuración, y cada pantalla tiene botón **Regresar** (también funciona el botón atrás del celular).
+- Diseño pensado para celular. **Más** separa Proveedores, Logística, Ayudas y Configuración, y cada pantalla tiene botón **Regresar** (también funciona el botón atrás del celular).
 - **Apariencia** por aparato: tema claro, oscuro o automático, 5 fuentes y colores personalizados.
 - **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Extensiones** si la tienda no los usa.
 - **Se instala como app** (PWA) en el celular o computador, con su ícono, desde **Más > Instalar la app**.
