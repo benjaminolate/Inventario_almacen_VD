@@ -1657,7 +1657,7 @@ function viewRespaldo(){
     <div class="card stack"><h3>Restaurar</h3>
       <p class="small muted" style="margin:0">Carga un respaldo descargado antes. Antes de restaurar se muestra qué trae el archivo.</p>
       <label class="btn block filebtn">Elegir archivo de respaldo<input type="file" id="restorefile" accept=".json,application/json"></label></div>
-    ${isDB() ? `<div class="card stack"><h3>Respaldo automático por correo</h3>
+    ${isDB() && db.profile?.maestra ? `<div class="card stack"><h3>Respaldo automático por correo</h3>
       <p class="small muted" style="margin:0">Todos los días llega un correo a Gmail con el respaldo adjunto, sin tener que acordarse. Se configura una sola vez con la guía.</p>
       <div id="autobk" class="small muted">Revisando…</div>
       <div class="grid2"><button class="btn" id="bkkey">Crear clave</button><a class="btn" style="text-align:center" href="${BACKUP_GUIDE}" target="_blank" rel="noopener">Ver la guía</a></div></div>` : ""}
@@ -2244,7 +2244,7 @@ function render(){
   if (v === "respaldo"){
     $("#backup").onclick = () => run(downloadBackup);
     $("#restorefile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) openRestore(f); };
-    if (isDB()) loadAutoBackup();
+    if (isDB() && db.profile?.maestra) loadAutoBackup();
   }
   if (v === "instalar"){ const b = $("#doinstall"); if (b) b.onclick = async () => { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; render(); }; }
   if (v === "pagina"){

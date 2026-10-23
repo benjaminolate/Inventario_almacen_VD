@@ -715,7 +715,10 @@ create or replace function public.nueva_clave_respaldo() returns text
 language plpgsql security definer set search_path = public, extensions as $$
 declare k text := encode(gen_random_bytes(24), 'hex');
 begin
-  if not es_admin() then raise exception 'Solo la administradora puede crear la clave del respaldo'; end if;
+  -- Solo la cuenta maestra: es quien configura el respaldo en GitHub
+  if not exists (select 1 from perfiles where id = auth.uid() and activo and maestra) then
+    raise exception 'Solo la cuenta maestra puede crear la clave del respaldo';
+  end if;
   insert into respaldo_clave (id, huella) values (1, encode(digest(k, 'sha256'), 'hex'))
   on conflict (id) do update set huella = excluded.huella, creado = now();
   return k;
@@ -723,7 +726,7 @@ end $$;
 
 create or replace function public.hay_clave_respaldo() returns timestamptz
 language sql stable security definer set search_path = public as $$
-  select creado from respaldo_clave where es_admin();
+  select creado from respaldo_clave where exists (select 1 from perfiles where id = auth.uid() and activo and maestra);
 $$;
 
 create or replace function public.respaldo_automatico(clave text) returns jsonb
