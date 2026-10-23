@@ -481,7 +481,7 @@ end $$;
 
 create or replace function public.crear_reserva(p_nombre text, p_telefono text, p_items jsonb, p_para text, p_nota text default '')
 returns jsonb
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare
   info jsonb := info_reservas();
   d date; k text; v jsonb; n int; total int := 0; det text := ''; limpio jsonb := '{}'::jsonb;
