@@ -1397,7 +1397,7 @@ function openReserva(r){
   const first = r.name.split(" ")[0], ready = `Hola ${first}, tu pan reservado (${r.detail}) ya está listo en el almacén. ¡Te esperamos!`;
   openModal(`<div class="stack">
     <div class="spread"><h2>${esc(r.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
-    <div class="row"><span class="pill ${RES_STATE[r.estado][0]}">${RES_STATE[r.estado][1]}</span><span class="small muted">Código ${esc(r.codigo)} · reservó ${ago(r.at)}</span></div>
+    <div class="row"><span class="pill ${RES_STATE[r.estado][0]}">${RES_STATE[r.estado][1]}</span><span class="small muted">Reservó ${ago(r.at)}</span></div>
     <div class="formula">${esc(r.detail)}</div>
     ${r.note ? `<p style="margin:0">Nota: ${esc(r.note)}</p>` : ""}
     ${r.estado === "pendiente" ? `<button class="btn primary block" data-st="entregada">Marcar como entregada</button>` : `<button class="btn block" data-st="pendiente">Volver a pendiente</button>`}
