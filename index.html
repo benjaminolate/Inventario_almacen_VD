@@ -885,7 +885,7 @@ function openScanSheet(cb, error){
 }
 function openAssociate(code, cb){
   const render = q => {
-    const items = S.products.filter(p => !p.barcode && p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    const items = findProducts(S.products.filter(p => !p.barcode), q).slice(0, 8);
     return items.map(p => `<button class="item tap" data-pid="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}</div></div><span class="btn sm">Es este</span></button>`).join("") || `<div class="empty">No hay coincidencias. Créalo como producto nuevo.</div>`;
   };
   openModal(`<div class="stack">
@@ -1071,11 +1071,40 @@ function viewInicio(){
   </div>`;
 }
 
+// ---------- Búsqueda: primero lo exacto, después lo parecido ----------
+// Sin tildes ni mayúsculas; "coca ret" encuentra "Coca-Cola 2 L retornable" y "cpca" encuentra "Coca"
+const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/['’]/g, "").replace(/[^a-z0-9ñ]+/g, " ").trim();
+function lev(a, b){
+  let prev = Array.from({ length:b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++){ const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    prev = cur; }
+  return prev[b.length];
+}
+// Puntaje: 100+ = contiene lo escrito tal cual · 50+ = están todas las palabras (en cualquier orden o con un error) · <50 = parecido
+function matchScore(name, q){
+  const n = norm(name), nq = norm(q); if (!nq) return 1;
+  if (n.includes(nq)) return 101 + (n.startsWith(nq) ? 20 : 0) - n.length / 1000;
+  if (n.replace(/ /g, "").includes(nq.replace(/ /g, ""))) return 95 - n.length / 1000;
+  const ws = n.split(" "), ts = nq.split(" ");
+  const tok = t => Math.max(0, ...ws.map(w => w.startsWith(t) ? 1 : w.includes(t) ? 0.8
+    : t.length >= 4 && (lev(t, w.slice(0, t.length)) <= 1 || lev(t, w) <= 1) ? 0.6 : 0));
+  const sc = ts.map(tok), hit = sc.filter(x => x > 0).length, avg = sc.reduce((a, b) => a + b, 0) / ts.length;
+  if (hit === ts.length) return 50 + avg * 30 - n.length / 1000;
+  return hit && hit / ts.length >= 0.5 ? 20 * avg : 0;
+}
+function findProducts(list, q){
+  if (!norm(q)) return list;
+  const code = q.trim();
+  return list.map(p => [p, p.barcode && p.barcode === code ? 200 : matchScore(p.name, q)]).filter(x => x[1] > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].name.localeCompare(b[0].name)).map(x => x[0]);
+}
 function searchResults(q, onPick, opts){
-  q = q.trim().toLowerCase();
-  if (!q) return "";
-  const res = S.products.filter(p => (opts?.all || p.has) && (p.name.toLowerCase().includes(q) || p.barcode === q)).slice(0, 8);
-  return res.map(p => `<button class="item tap" data-pick="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${precioTxt(p)} · ${esc(p.cat)}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados para “${esc(q)}”.</div>`;
+  if (!q.trim()) return "";
+  const res = findProducts(S.products.filter(p => opts?.all || p.has), q).slice(0, 10);
+  const tier = p => p.barcode === q.trim() ? 3 : (x => x >= 100 ? 2 : x >= 50 ? 1 : 0)(matchScore(p.name, q));
+  const ts = res.map(tier), i = ts.findIndex(t => t < ts[0]);
+  return res.map((p, k) => (k === i ? `<div class="small muted" style="padding:10px 0 2px">Parecidos</div>` : "") + `<button class="item tap" data-pick="${p.id}"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${precioTxt(p)} · ${esc(p.cat)}</div></div>${stockPill(p)}</button>`).join("") || `<div class="empty">Sin resultados para “${esc(q.trim())}”.</div>`;
 }
 
 function viewVender(){
@@ -1244,8 +1273,7 @@ function finishCount(){ run(async () => {
 }); }
 
 function viewProductos(){
-  const q = ui.prodQuery.toLowerCase();
-  const f = ui.prodFilter, list = S.products.filter(p => (f==="Todos" || (f==="Sin precio" ? !p.price : p.cat===f)) && (p.name.toLowerCase().includes(q) || p.barcode === q.trim()));
+  const f = ui.prodFilter, list = findProducts(S.products.filter(p => f==="Todos" || (f==="Sin precio" ? !p.price : p.cat===f)), ui.prodQuery);
   return `${header("Productos", `${S.products.filter(p=>p.has).length} productos en el catálogo`)}
   <div class="stack">
     <div class="searchbar"><input class="input" id="pq" placeholder="Buscar" value="${esc(ui.prodQuery)}"><button class="btn primary" id="addp">+ Agregar</button></div>
@@ -1786,8 +1814,7 @@ function openProvPick(v, fromRecv){
   const sel = new Set(S.products.filter(p => p.provId === v.id).map(p => p.id)), orig = new Set(sel);
   let q = "", cat = "Todos";
   const cats = ["Todos", ...SECTORS.filter(c => S.products.some(p => p.cat === c && p.has))];
-  const list = () => S.products.filter(p => (p.has || sel.has(p.id)) && (cat === "Todos" || p.cat === cat) && p.name.toLowerCase().includes(q.toLowerCase()))
-    .sort((a,b) => a.name.localeCompare(b.name)).slice(0, 150).map(p => { const otro = p.provId && p.provId !== v.id ? provById(p.provId) : null;
+  const list = () => findProducts(S.products.filter(p => (p.has || sel.has(p.id)) && (cat === "Todos" || p.cat === cat)).sort((a,b) => a.name.localeCompare(b.name)), q).slice(0, 150).map(p => { const otro = p.provId && p.provId !== v.id ? provById(p.provId) : null;
       return `<label class="item tap"><input type="checkbox" data-vp="${p.id}" ${sel.has(p.id) ? "checked" : ""} style="width:20px;height:20px"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.cat)}${otro ? " · ahora de " + esc(otro.name) : ""}</div></div></label>`; }).join("") || `<div class="empty">Sin resultados.</div>`;
   openModal(`<div class="stack">
     <div class="spread"><h2>Productos de ${esc(v.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
