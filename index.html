@@ -132,6 +132,7 @@ a.btn.primary{color:var(--brand-fg)}
 .countrow .opts{grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
 .countrow .input{text-align:center;font-weight:700;font-size:17px;padding:8px}
 .countrow.off{opacity:.55}
+.linkbtn{background:none;border:0;padding:0;font:inherit;color:var(--brand);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 .cartline{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
 .stepper{display:flex;align-items:center;gap:4px}
 .stepper button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-weight:700}
@@ -868,6 +869,7 @@ function scanAction(){
   if (v === "vender" || v === "inicio") return p => { if (ui.view !== "vender") go("vender"); addToCart(p, true); };
   if (v === "recibir") return p => addToRecv(p);
   if (v === "contar" && ui.sector) return p => {
+    if (countAsk()) return openCountQty(p);
     if (p.cat !== ui.sector) toast(`${p.name} es del sector ${p.cat}; se suma igual`); else toast(`+1 ${p.name}`);
     const d = (ui.draft[p.id] ||= {}); d.qty = String(r3((parseFloat(d.qty)||0) + 1)); d.none = false; render(); };
   if (v === "productos") return p => openProduct(p);
@@ -1227,6 +1229,8 @@ function openGranel(p, idx){
 
 function viewRecibir(){
   const cc = can("costos"), total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos"), anyBox = ui.recv.items.some(l => l.box);
+  // Quien recibe puede anotar el costo de lo que todavía no tiene costo, aunque no vea los costos de lo demás
+  const showC = l => cc || !P(l.pid).cost, anyC = ui.recv.items.some(showC);
   return `${backMasHtml()}${header("Recibir mercadería", "Lo que llega del proveedor").replace(netPill(), "")}
   <div class="stack">
     <div class="field" id="supfield"><label for="sup">Proveedor o distribuidora</label>
@@ -1239,12 +1243,13 @@ function viewRecibir(){
     <div id="provpicks">${provPicks()}</div>
     <div class="card" id="recvlist">
       <h3>Productos recibidos</h3>
-      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:${cc ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
+      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid), c = showC(l); return `<div class="countrow" style="grid-template-columns:${c ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div>
+          ${p.cost || l.cost ? "" : `<div class="small" style="color:var(--warn);font-weight:600">Sin costo: escríbelo ${l.box ? "por caja" : isKg(p) ? "por kilo" : "por unidad, o marca Por caja"}</div>`}</div>
         <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
-        ${cc ? `<input class="input" type="number" min="0" inputmode="numeric" value="${l.cost}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">` : ""}
-        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades${cc ? ` a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : ""}` : "unidades"}</span></div>`}
+        ${c ? `<input class="input" type="number" min="0" inputmode="numeric" value="${l.cost || ""}" placeholder="${l.box ? "Caja $" : isKg(p) ? "$ kg" : "$ c/u"}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">` : ""}
+        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades${c && l.cost ? ` a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : ""}` : "unidades"}</span></div>`}
         ${venc ? `<div class="opts"><label for="rv${i}">Vence</label><input class="input" style="width:auto;font-size:14px;font-weight:500;padding:6px 8px" type="date" id="rv${i}" value="${esc(l.vence || "")}" data-rv="${i}"><span class="muted">opcional</span></div>` : ""}</div>`; }).join("") +
-        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span>${cc ? `<span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span>` : ""}</div>`
+        `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span>${anyC ? `<span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span>` : ""}</div>`
         : `<div class="empty">Agrega los productos de la factura. Ejemplo: 2 cajas de Coca-Cola 1,5 L = 24 unidades.</div>`}
       ${cc ? `<div class="spread" style="padding-top:12px"><span class="muted">Total factura</span><span class="total">${clp(total)}</span></div>` : ""}
     </div>
@@ -1287,17 +1292,46 @@ function viewContar(){
   const ps = S.products.filter(p => p.cat === ui.sector);
   return `<header class="top"><button class="btn sm" id="back">← Regresar a sectores</button><span class="small muted">${ps.filter(p=>p.has).length} productos</span></header>
   <div class="stack">
-    <div><h2>Contando: ${esc(ui.sector)}</h2><p class="small muted" style="margin:4px 0 0">Escribe lo que hay en la estantería. Cada escaneo suma 1. Lo que no tengan, márcalo y desaparece de las listas.</p></div>
-    <div class="row"><button class="btn accent" id="scan">Escanear (+1)</button>${can("productos") ? `<button class="btn" id="addp">+ Agregar producto</button>` : ""}</div>
+    <div><h2>Contando: ${esc(ui.sector)}</h2><p class="small muted" style="margin:4px 0 0">Escribe lo que hay en la estantería. ${countAsk() ? "Al escanear se pregunta la cantidad." : "Cada escaneo suma 1."} Lo que no tengan, márcalo y desaparece de las listas.</p></div>
+    <div class="row"><button class="btn accent" id="scan">${countAsk() ? "Escanear" : "Escanear (+1)"}</button>${can("productos") ? `<button class="btn" id="addp">+ Agregar producto</button>` : ""}</div>
+    <div class="field" id="cmodes"><label>Al escanear</label><div class="chips"><button class="chip" data-cmode="1" aria-pressed="${!countAsk()}">Suma 1 cada vez</button><button class="chip" data-cmode="q" aria-pressed="${countAsk()}">Preguntar cantidad</button></div>
+      <span class="small muted">${countAsk() ? "Escanea una vez y escribe cuántos hay, o cuántas cajas y de cuántas unidades." : "Para una caja completa, toca Cajas × en el producto y escribe la multiplicación."}</span></div>
     <div class="card" style="padding-block:4px">
       ${ps.map(p => { const d = ui.draft[p.id] || {}; const off = d.none ?? !p.has; const prev = stockOf(p);
         return `<div class="countrow ${off?"off":""}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">${off ? "No lo tenemos" : prev==null ? "Sin contar" : `Sistema dice: ${fq(prev, p)}${p.estimated?" (aprox.)":""}`}</div></div>
           <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal" placeholder="kg"' : 'inputmode="numeric" placeholder="—"'} value="${d.qty ?? ""}" data-cq="${p.id}" ${off?"disabled":""} aria-label="Cantidad de ${esc(p.name)}">
           <div class="opts"><label><input type="checkbox" data-ce="${p.id}" ${d.est?"checked":""} ${off?"disabled":""}> Es aproximado</label>
-          <button class="btn sm ghost" data-cn="${p.id}">${off ? "Sí lo tenemos" : "No lo tenemos"}</button></div></div>`; }).join("")}
+          ${off ? "" : `<button class="btn sm" data-cmul="${p.id}">Cajas ×</button>`}<button class="btn sm ghost" data-cn="${p.id}">${off ? "Sí lo tenemos" : "No lo tenemos"}</button></div></div>`; }).join("")}
     </div>
     <button class="btn primary block" id="finish">Terminar conteo</button>
   </div>`;
+}
+// Conteo por cajas: se escanea una vez y se escribe "4 cajas × 5" en vez de escanear uno por uno
+const COUNT_MODE_KEY = "almacen-conteo-cantidad";
+function countAsk(set){ try { if (set !== undefined) set ? localStorage.setItem(COUNT_MODE_KEY, "1") : localStorage.removeItem(COUNT_MODE_KEY); return localStorage.getItem(COUNT_MODE_KEY) === "1"; } catch(e){ return !!set; } }
+function openCountQty(p){
+  const d = ui.draft[p.id] || {}, prev = parseFloat(d.qty) || 0, kg = isKg(p);
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(p.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <p class="small muted" style="margin:0">${prev ? `Ya contaste ${fq(prev, p)}. Lo que escribas se suma.` : "Escribe cuántos hay, o cuántas cajas y de cuántas unidades."}${p.cat !== ui.sector ? ` Es del sector ${esc(p.cat)}; se suma igual.` : ""}</p>
+    ${kg ? "" : `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end">
+      <div class="field"><label for="cqb">Cajas</label><input class="input" id="cqb" type="number" min="0" inputmode="numeric" placeholder="Ej: 4"></div>
+      <span style="font-size:22px;font-weight:700;padding-bottom:10px">×</span>
+      <div class="field"><label for="cqn">Unidades por caja</label><input class="input" id="cqn" type="number" min="1" inputmode="numeric" placeholder="Ej: 5" value="${p.porCaja || ""}"></div></div>`}
+    <div class="field"><label for="cqs">${kg ? "Kilos" : "Más unidades sueltas"}</label><input class="input" id="cqs" type="number" min="0" ${kg ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} placeholder="${kg ? "Ej: 2,5" : "Opcional"}"></div>
+    <div class="spread"><span class="muted" id="cqtxt">Total a sumar</span><span class="total" id="cqtot">0</span></div>
+    <button class="btn primary block" id="cqok">Sumar al conteo</button>
+    ${prev ? `<button class="btn ghost block" id="cqrep">Reemplazar lo contado</button>` : ""}
+  </div>`);
+  const val = id => Math.max(0, +($(id)?.value || 0) || 0);
+  const tot = () => r3(val("#cqb") * (val("#cqn") || 0) + val("#cqs"));
+  const show = () => { const t = tot(); $("#cqtot").textContent = fq(t, p); $("#cqtxt").textContent = prev ? `${fq(prev, p)} + ${fq(t, p)} = ${fq(r3(prev + t), p)}` : "Total a sumar"; };
+  ["#cqb","#cqn","#cqs"].forEach(id => { const i = $(id); if (i){ i.oninput = show; i.onkeydown = e => { if (e.key === "Enter") $("#cqok").click(); }; } });
+  const put = q => { const t = tot(); if (!t) return ($("#cqb") || $("#cqs")).focus();
+    const x = (ui.draft[p.id] ||= {}); x.qty = String(r3(q + t)); x.none = false; closeModal(); render(); toast(`${p.name}: ${fq(r3(q + t), p)}`); };
+  $("#cqok").onclick = () => put(prev);
+  if ($("#cqrep")) $("#cqrep").onclick = () => put(0);
+  show(); setTimeout(() => ($("#cqb") || $("#cqs"))?.focus(), 50);
 }
 function finishCount(){ run(async () => {
   const { n, diffs } = await act.count(ui.draft);
@@ -1846,14 +1880,26 @@ function viewCompras(){
     <div><h2>Lista de compras</h2><p class="small muted" style="margin:4px 0 0">Se arma sola con lo que bajó del mínimo, separada por proveedor. Ajusta las cantidades antes de pedir; 0 lo saca del pedido.</p></div>
     ${gs.map((g, gi) => `<div class="card stack">
       <div class="spread"><div><div style="font-weight:700">${esc(g.v ? g.v.name : "Sin proveedor asignado")}</div>${g.v?.note ? `<div class="small muted">${esc(g.v.note)}</div>` : ""}</div><span class="small muted">${g.items.length} productos</span></div>
-      <div class="list">${g.items.map(i => `<div class="item"><div class="main"><div class="name">${esc(i.p.name)}</div><div class="sub">Quedan ${fq(i.s, i.p)} · mínimo ${fq(i.p.min, i.p)}</div></div>
+      <div class="list">${g.items.map(i => `<div class="item"><div class="main"><div class="name">${esc(i.p.name)}</div><div class="sub">Quedan ${fq(i.s, i.p)} · ${can("productos") ? `<button class="linkbtn" data-smin="${i.p.id}">mínimo ${fq(i.p.min, i.p)} ✎</button>` : `mínimo ${fq(i.p.min, i.p)}`}</div></div>
         <input class="input" style="width:76px;text-align:center;font-weight:700" type="number" min="0" inputmode="numeric" value="${i.q}" data-sq="${i.p.id}" aria-label="Pedir de ${esc(i.p.name)}"></div>`).join("")}</div>
       ${g.v ? "" : `<p class="small muted" style="margin:0">Asigna el proveedor de cada producto en Productos para que quede en su grupo.</p>`}
       <div class="grid2">${can("whatsapp") ? `<a class="btn" style="text-align:center" href="${esc(waLink(g.v?.phone || "", pedidoMsg(g)))}" ${WA_TARGET}>Pedir por WhatsApp</a>` : ""}<button class="btn" data-scopy="${gi}">Copiar pedido</button></div>
       <button class="btn primary block" data-srecv="${gi}">Recibir este pedido</button>
     </div>`).join("") || `<div class="card empty">Nada bajo el mínimo. Cuando un producto contado baja de su stock mínimo, aparece aquí.</div>`}
-    <p class="small muted" style="margin:0">Solo aparecen productos ya contados. El mínimo de cada producto se cambia en Productos.</p>
+    <p class="small muted" style="margin:0">Solo aparecen productos ya contados. Toca el mínimo de un producto para cambiarlo si la demanda cambia.</p>
   </div>`;
+}
+// El mínimo decide cuándo un producto entra a la lista de compras; se ajusta si la demanda cambia
+function openMinimo(p){
+  openModal(`<div class="stack">
+    <div class="spread"><h2>${esc(p.name)}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
+    <p style="margin:0">Cuando quedan menos que el mínimo, aparece en la lista de compras. Quedan ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}.</p>
+    <div class="field"><label for="mnv">Stock mínimo</label><input class="input" id="mnv" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${p.min}"></div>
+    <button class="btn primary block" id="mnok">Guardar mínimo</button>
+  </div>`);
+  const i = $("#mnv"); i.focus(); i.select();
+  const ok = () => run(async () => { const v = Math.max(0, r3(+i.value || 0)); await act.updateProduct(p, { min:v }); closeModal(); render(); toast(`Mínimo de ${p.name}: ${fq(v, p)}`); });
+  $("#mnok").onclick = ok; i.onkeydown = e => { if (e.key === "Enter") ok(); };
 }
 function viewProveedores(){
   const vs = (S.proveedores || []).slice().sort((a,b) => a.name.localeCompare(b.name));
@@ -1913,11 +1959,13 @@ function openProvPick(v, fromRecv){
 
 // ---------- Costos por proveedor: cuánto cuesta cada producto por unidad y por caja ----------
 // ---------- Resumen de ventas (dueña, o quien tenga el permiso) ----------
-const RES_PER = [["hoy","Hoy"],["semana","7 días"],["mes","Este mes"],["mespasado","Mes pasado"]];
+const RES_PER = [["hoy","Hoy"],["semana","7 días"],["mes","Este mes"],["mespasado","Mes pasado"],["ano","Este año"],["anopasado","Año pasado"]];
 function resRange(k){
   const d = new Date(); d.setHours(0,0,0,0);
   if (k === "hoy") return [d, new Date(d.getTime() + D)];
   if (k === "semana") return [new Date(d.getTime() - 6*D), new Date(d.getTime() + D)];
+  if (k === "ano") return [new Date(d.getFullYear(), 0, 1), new Date(d.getTime() + D)];
+  if (k === "anopasado") return [new Date(d.getFullYear() - 1, 0, 1), new Date(d.getFullYear(), 0, 1)];
   const m0 = new Date(d.getFullYear(), d.getMonth(), 1);
   return k === "mes" ? [m0, new Date(d.getTime() + D)] : [new Date(d.getFullYear(), d.getMonth() - 1, 1), m0];
 }
@@ -1928,6 +1976,7 @@ function viewResumen(){
     <div><h2>Resumen de ventas</h2><p class="small muted" style="margin:4px 0 0">Lo vendido en el período, por medio de pago, por día y por producto.</p></div>
     <div class="chips">${RES_PER.map(([v, n]) => `<button class="chip" data-rper="${v}" aria-pressed="${k === v}">${n}</button>`).join("")}</div>
     <div id="resbox"><div class="card empty">Calculando…</div></div>
+    <button class="btn block" id="resxls" disabled>Descargar en Excel</button>
   </div>`;
 }
 async function loadResumen(){
@@ -1937,12 +1986,13 @@ async function loadResumen(){
         .map(r => ({ pid:r.producto_id, qty:+r.cantidad, price:r.precio || 0, disc:r.descuento || 0, medio:r.medio, g:r.grupo || r.id, at:iso(r.at) }))
     : S.movs.filter(m => m.type === "venta" && m.at >= d0.getTime() && m.at < d1.getTime()).map(m => ({ pid:m.pid, qty:m.qty, price:m.price || 0, disc:m.disc || 0, medio:m.medio, g:m.at, at:m.at }));
   const box = $("#resbox"); if (ui.view !== "resumen" || !box || (ui.resPer || "semana") !== k) return;
+  ui.resRows = { k, rows }; const xb = $("#resxls"); if (xb) xb.disabled = !rows.length;
   if (!rows.length){ box.innerHTML = `<div class="card empty">No hay ventas en este período.</div>`; return; }
-  const cc = can("costos"), money = r => lineMoney(r.qty, r.price) - r.disc;
+  const cc = can("costos"), money = r => lineMoney(r.qty, r.price) - r.disc, porMes = k === "ano" || k === "anopasado";
   let total = 0, gan = 0, sinCosto = new Set(); const medios = {}, dias = {}, prods = {};
   rows.forEach(r => { const m = money(r), p = P(r.pid); total += m;
     medios[r.medio || "efectivo"] = (medios[r.medio || "efectivo"] || 0) + m;
-    const dk = new Date(r.at).toLocaleDateString("es-CL", { weekday:"short", day:"numeric", month:"short" }); dias[dk] = (dias[dk] || 0) + m;
+    const dk = new Date(r.at).toLocaleDateString("es-CL", porMes ? { month:"long", year:"numeric" } : { weekday:"short", day:"numeric", month:"short" }); dias[dk] = (dias[dk] || 0) + m;
     const x = prods[r.pid] ||= { qty:0, money:0, gan:0 }; x.qty += r.qty; x.money += m;
     if (p && p.cost){ const g = m - Math.round(r.qty * p.cost); x.gan += g; gan += g; } else sinCosto.add(r.pid); });
   const n = new Set(rows.map(r => r.g)).size, maxDia = Math.max(...Object.values(dias));
@@ -1955,10 +2005,61 @@ async function loadResumen(){
     </div>
     ${cc && sinCosto.size ? `<p class="small muted" style="margin:0">${sinCosto.size} ${sinCosto.size === 1 ? "producto vendido no tiene" : "productos vendidos no tienen"} costo y no ${sinCosto.size === 1 ? "suma" : "suman"} a la ganancia. La ganancia usa el costo actual de cada producto.</p>` : ""}
     <div class="card"><h3>Por medio de pago</h3><div class="list">${MEDIOS.filter(([m]) => medios[m]).map(([m, nm]) => `<div class="item"><div class="main"><div class="name">${nm}</div></div><div class="qty">${clp(medios[m])}</div></div>`).join("")}</div></div>
-    ${Object.keys(dias).length > 1 ? `<div class="card stack"><h3>Por día</h3>${Object.entries(dias).map(([d, m]) => `<div style="display:grid;grid-template-columns:96px 1fr 84px;gap:8px;align-items:center"><span class="small muted">${esc(d)}</span><div class="bar" style="margin:0"><i style="width:${Math.max(2, Math.round(m / maxDia * 100))}%"></i></div><span class="small" style="text-align:right;font-weight:600">${clp(m)}</span></div>`).join("")}</div>` : ""}
+    ${Object.keys(dias).length > 1 ? `<div class="card stack"><h3>${porMes ? "Por mes" : "Por día"}</h3>${Object.entries(dias).map(([d, m]) => `<div style="display:grid;grid-template-columns:${porMes ? "120px" : "96px"} 1fr 84px;gap:8px;align-items:center"><span class="small muted">${esc(d)}</span><div class="bar" style="margin:0"><i style="width:${Math.max(2, Math.round(m / maxDia * 100))}%"></i></div><span class="small" style="text-align:right;font-weight:600">${clp(m)}</span></div>`).join("")}</div>` : ""}
     <div class="card"><h3>Lo que más vendió</h3><div class="list">${top.map(([id, x]) => { const p = P(id);
       return `<div class="item"><div class="main"><div class="name">${esc(p ? p.name : "Producto")}</div><div class="sub">${p ? fq(x.qty, p) : x.qty}${cc && p && p.cost ? " · ganancia " + clp(x.gan) : ""}</div></div><div class="qty">${clp(x.money)}</div></div>`; }).join("")}</div></div>
   </div>`;
+}
+
+// ---------- Descarga a Excel (.xlsx) sin librerías: hojas "Resumen" y "Ventas" ----------
+function xlsxBlob(sheets){
+  const enc = new TextEncoder(), x = v => String(v).replace(/[<>&"]/g, c => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;" })[c]);
+  const col = i => { let s = ""; for (i++; i; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; };
+  // Fila 1 en negrita; los números con separador de miles
+  const sheet = rows => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => { const ref = col(ci) + (ri + 1);
+    if (v == null || v === "") return ""; if (typeof v === "number") return `<c r="${ref}"${ri ? ` s="2"` : ` s="1"`}><v>${v}</v></c>`;
+    return `<c r="${ref}" t="inlineStr"${ri ? "" : ` s="1"`}><is><t xml:space="preserve">${x(v)}</t></is></c>`; }).join("")}</row>`).join("")}</sheetData></worksheet>`;
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(([n], i) => `<sheet name="${x(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
+    ...sheets.map(([, rows], i) => [`xl/worksheets/sheet${i + 1}.xml`, sheet(rows)])
+  ].map(([n, t]) => [enc.encode(n), enc.encode(t)]);
+  // ZIP sin compresión (el formato .xlsx es un zip de archivos XML)
+  const crcT = Array.from({ length:256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+  const crc = b => { let c = ~0; for (const v of b) c = crcT[(c ^ v) & 255] ^ (c >>> 8); return ~c >>> 0; };
+  const parts = [], cen = []; let off = 0;
+  const h = (n, sz) => { const a = new Uint8Array(sz), dv = new DataView(a.buffer); return [a, dv]; };
+  for (const [name, data] of files){
+    const c = crc(data), [lh, l] = h(0, 30);
+    l.setUint32(0, 0x04034b50, true); l.setUint16(4, 20, true); l.setUint32(14, c, true); l.setUint32(18, data.length, true); l.setUint32(22, data.length, true); l.setUint16(26, name.length, true);
+    const [ch, e] = h(0, 46);
+    e.setUint32(0, 0x02014b50, true); e.setUint16(4, 20, true); e.setUint16(6, 20, true); e.setUint32(16, c, true); e.setUint32(20, data.length, true); e.setUint32(24, data.length, true); e.setUint16(28, name.length, true); e.setUint32(42, off, true);
+    parts.push(lh, name, data); cen.push(ch, name); off += 30 + name.length + data.length;
+  }
+  const cs = cen.reduce((a, b) => a + b.length, 0), [eh, z] = h(0, 22);
+  z.setUint32(0, 0x06054b50, true); z.setUint16(8, files.length, true); z.setUint16(10, files.length, true); z.setUint32(12, cs, true); z.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, eh], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+function downloadResumen(){
+  const st = ui.resRows; if (!st || !st.rows.length) return;
+  const cc = can("costos"), per = (RES_PER.find(r => r[0] === st.k) || [, ""])[1], [d0, d1] = resRange(st.k);
+  const fmtD = t => new Date(t).toLocaleDateString("es-CL", { year:"numeric", month:"2-digit", day:"2-digit" }), fmtH = t => new Date(t).toLocaleTimeString("es-CL", { hour:"2-digit", minute:"2-digit", hour12:false });
+  const ventas = [["Fecha", "Hora", "Producto", "Sector", "Cantidad", "Precio unitario", "Descuento", "Total", "Medio de pago", ...(cc ? ["Costo unitario", "Ganancia"] : [])]];
+  let total = 0, gan = 0; const medios = {}, prods = {};
+  st.rows.forEach(r => { const p = P(r.pid), m = lineMoney(r.qty, r.price) - r.disc, g = p && p.cost ? m - Math.round(r.qty * p.cost) : null;
+    total += m; if (g != null) gan += g; const mn = medioName(r.medio || "efectivo"); medios[mn] = (medios[mn] || 0) + m;
+    const x = prods[r.pid] ||= { qty:0, money:0 }; x.qty += r.qty; x.money += m;
+    ventas.push([fmtD(r.at), fmtH(r.at), p ? p.name : "Producto", p ? p.cat : "", r.qty, r.price, r.disc || 0, m, mn, ...(cc ? [p?.cost || "", g ?? ""] : [])]); });
+  const nombre = isDB() ? db.ajustes.tienda_nombre || "Almacén" : "Almacén de ejemplo";
+  const resumen = [["Resumen de ventas", nombre], ["Período", `${per}: ${fmtD(d0)} al ${fmtD(d1.getTime() - 1)}`], ["Ventas", new Set(st.rows.map(r => r.g)).size], ["Total vendido", total], ...(cc ? [["Ganancia estimada", gan]] : []), [],
+    ["Medio de pago", "Total"], ...Object.entries(medios), [], ["Producto", "Cantidad", "Total"],
+    ...Object.entries(prods).sort((a, b) => b[1].money - a[1].money).map(([id, x]) => [P(id)?.name || "Producto", x.qty, x.money])];
+  const url = URL.createObjectURL(xlsxBlob([["Resumen", resumen], ["Ventas", ventas]]));
+  const a = document.createElement("a"); a.href = url; a.download = `ventas-${st.k}-${hoyChile()}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Resumen descargado");
 }
 
 function viewCostos(){
@@ -2232,8 +2333,8 @@ function basicTour(){
     ...(can("contar") ? [
       st('#tabs [data-view="contar"]', "Contar", "Así se carga lo que hay de verdad en la estantería, un sector a la vez. Toca <b>Contar</b>.", { tap:true }),
       st("[data-sector]", "Elige un sector", "Cada sector queda al día desde su propio conteo, así que se puede contar uno por día. Toca este para ver cómo es.", { tap:true }),
-      st(".countrow:not(.off)", "Escribe lo que hay", "Anota cuántas unidades hay en la estantería. Si no estás segura, marca <b>Es aproximado</b>. Si la tienda no vende ese producto, toca <b>No lo tenemos</b> y desaparece de las listas.", { free:true }),
-      st("#scan", "Contar escaneando", "También se puede escanear: cada lectura suma 1 a ese producto."),
+      st(".countrow:not(.off)", "Escribe lo que hay", "Anota cuántas unidades hay en la estantería. Con <b>Cajas ×</b> escribes, por ejemplo, 4 cajas de 5 y la app multiplica. Si no estás segura, marca <b>Es aproximado</b>. Si la tienda no vende ese producto, toca <b>No lo tenemos</b> y desaparece de las listas.", { free:true }),
+      st("#scan", "Contar escaneando", "También se puede escanear. Abajo eliges si cada lectura suma 1 o si pregunta la cantidad, para escanear una caja una sola vez."),
       st("#finish", "Terminar conteo", "Al final se toca <b>Terminar conteo</b>: el sector queda al día y la app muestra lo que faltó o sobró. Ahora no lo guardamos.")] : []),
     st('#tabs [data-view="productos"]', "Productos", "Aquí está todo el catálogo de la tienda. Toca <b>Productos</b>.", { tap:true }),
     st("#pq", "Buscar en el catálogo", "Busca igual que al vender. Abajo se ve el precio, el sector y cuánto queda de cada uno."),
@@ -2258,6 +2359,8 @@ const TOURS = {
     st("#confirm", "Confirmar", "Registra la venta y descuenta el stock. Sin internet queda guardada en el celular y se envía sola después.")],
   contar: () => ui.sector ? [
     st(".countrow:not(.off)", "Escribe lo que hay", "Anota las unidades que hay en la estantería. Marca Es aproximado si no estás segura."),
+    st("[data-cmul]", "Cajas ×", "Para una caja completa: escribe cuántas cajas y de cuántas unidades, y la app multiplica."),
+    st("#cmodes", "Al escanear", "Elige si cada escaneo suma 1, o si después de escanear se pregunta la cantidad (ideal para cajas)."),
     st("[data-cn]", "No lo tenemos", "Si la tienda no vende ese producto, tócalo y desaparece de las listas."),
     st("#scan", "Escanear", "Cada lectura suma 1 al producto escaneado."),
     st("#addp", "Agregar producto", "Si en la estantería hay algo que no está en la lista, agrégalo aquí."),
@@ -2277,7 +2380,7 @@ const TOURS = {
     st("#supfield", "Proveedor", "Toca la distribuidora que llegó o escribe una nueva. Las nuevas quedan guardadas."),
     st("#provpicks .card", "Sus productos", "Los productos asociados a ese proveedor aparecen aquí: tócalos y se agregan sin buscar."),
     st("#q", "Buscar o escanear", "Para lo que no está arriba, búscalo por nombre o escanéalo."),
-    st("#recvlist", "Cantidades", can("costos") ? "Escribe cuánto llegó y el costo. Marca <b>Por caja</b> si viene en cajas: la app lo pasa a unidades." : "Escribe cuánto llegó. Marca <b>Por caja</b> si viene en cajas: la app lo pasa a unidades."),
+    st("#recvlist", "Cantidad y costo", can("costos") ? "Escribe cuánto llegó y cuánto costó. Marca <b>Por caja</b> si viene en cajas: escribes las cajas y el precio de la caja, y la app lo pasa a unidades." : "Escribe cuánto llegó. Si un producto no tiene costo, escríbelo por unidad o, con <b>Por caja</b>, el precio de la caja."),
     st("#confirm", "Guardar", "Al guardar, el stock sube al tiro" + (can("costos") ? " y se actualiza el costo de cada producto." : "."))],
   historial: () => [
     st(() => $("[data-hf]")?.parentElement, "Filtrar", "Elige ver solo ventas, compras o conteos."),
@@ -2292,11 +2395,13 @@ const TOURS = {
   compras: () => [
     st("#app .card", "Pedido por proveedor", "Se arma solo con lo que bajó del mínimo, separado por proveedor. Cuando algo contado baja de su mínimo, aparece aquí."),
     st("[data-sq]", "Cantidad a pedir", "Ajusta cuánto pedir. Con 0 sale del pedido."),
+    st("[data-smin]", "Stock mínimo", "Tócalo para cambiar el mínimo si la demanda cambia. Con menos de eso, el producto aparece en esta lista."),
     st("[data-scopy]", "Enviar el pedido", can("whatsapp") ? "Pídelo por WhatsApp o copia el texto para mandarlo por otro lado." : "Copia el texto del pedido para mandarlo."),
     st("[data-srecv]", "Cuando llegue", "Abre Recibir mercadería con este pedido ya cargado, para revisar y guardar.")],
   resumen: () => [
     st(() => $("[data-rper]")?.parentElement, "Período", "Hoy, esta semana, este mes o el mes pasado."),
-    st("#resbox", "El resumen", "Total vendido, ganancia, cuánto entró por cada medio de pago, los mejores días y lo más vendido.", { wait:2500 })],
+    st("#resbox", "El resumen", "Total vendido, ganancia, cuánto entró por cada medio de pago, los mejores días y lo más vendido.", { wait:2500 }),
+    st("#resxls", "Descargar en Excel", "Baja un archivo de Excel con el resumen y cada venta del período, con fecha, producto, cantidad y medio de pago.")],
   vencimientos: () => [
     st("#app .card", "Por vencer", "Lo vencido y lo que vence esta semana, según las fechas anotadas al recibir."),
     st("[data-voferta]", "Rebajarlo", "Crea una oferta para venderlo antes de que venza."),
@@ -2368,7 +2473,17 @@ function tourClick(e){
   const s = t.steps[t.i];
   if (s?.tap && t.el && t.el.contains(e.target)){ const i = t.i; setTimeout(() => tour === t && t.i === i && tourStep(i + 1, 1), 60); }
 }
-const tourFind = s => { const el = typeof s.el === "function" ? s.el() : $(s.el); if (!el) return null; const r = el.getBoundingClientRect(); return r.width || r.height ? el : null; };
+// El primer elemento que se vea de verdad (no dentro de algo cerrado ni cortado por una fila con scroll)
+const tourVisible = el => { const r = el.getBoundingClientRect(); return !!(r.width || r.height); };
+const tourFind = s => typeof s.el === "function" ? (x => x && tourVisible(x) ? x : null)(s.el()) : [...document.querySelectorAll(s.el)].find(tourVisible) || null;
+// Si está en una fila que se desliza de lado (como los filtros de Productos), la fila se mueve hasta dejarlo al centro
+function tourScrollX(el, smooth){
+  for (let c = el.parentElement; c && c !== document.body; c = c.parentElement){
+    if (c.scrollWidth <= c.clientWidth + 1 || !/(auto|scroll)/.test(getComputedStyle(c).overflowX)) continue;
+    const er = el.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    if (er.left < cr.left || er.right > cr.right) c.scrollTo({ left: c.scrollLeft + (er.left - cr.left) - (cr.width - er.width) / 2, behavior: smooth ? "smooth" : "auto" });
+  }
+}
 async function tourStep(i, dir){
   const t = tour; if (!t) return;
   const seq = ++t.seq;
@@ -2382,13 +2497,16 @@ async function tourStep(i, dir){
     while (!(el = tourFind(s)) && Date.now() - t0 < wait){ await pause(50); if (tour !== t || t.seq !== seq) return; }
     if (!el) return tourStep(i + dir, dir);
     // Primero se mueve la página hasta el elemento y después el foco se desliza hacia él
+    const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    tourScrollX(el, smooth);
     const r = el.getBoundingClientRect();
-    if (r.top < 70 || r.bottom > innerHeight - 90){
-      el.scrollIntoView({ block:"center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      let last = null, still = 0; const t1 = Date.now();
-      while (still < 4 && Date.now() - t1 < 900){ await new Promise(requestAnimationFrame); const y = el.getBoundingClientRect().top; still = y === last ? still + 1 : 0; last = y; }
-      if (tour !== t || t.seq !== seq) return;
+    if (r.top < 70 || r.bottom > innerHeight - 90 || r.left < 0 || r.right > innerWidth){
+      el.scrollIntoView({ block:"center", inline:"nearest", behavior: smooth ? "smooth" : "auto" });
     }
+    // Espera a que termine de moverse antes de deslizar el foco
+    let last = "", still = 0; const t1 = Date.now();
+    while (still < 4 && Date.now() - t1 < 900){ await new Promise(requestAnimationFrame); const q = el.getBoundingClientRect(), k = q.left + "," + q.top; still = k === last ? still + 1 : 0; last = k; }
+    if (tour !== t || t.seq !== seq) return;
   }
   t.el = el;
   const n = t.steps.length, last = i === n - 1, back = i > 0 && !t.steps[i - 1].tap;
@@ -2418,7 +2536,8 @@ function tourLayout(){
   const s = t.steps[t.i], vw = innerWidth, vh = innerHeight, pad = 6;
   let x = vw / 2, y = vh / 2, w = 0, h = 0;
   if (t.el && s.el){ const r = t.el.getBoundingClientRect(); x = r.left - pad; y = r.top - pad; w = r.width + pad * 2; h = r.height + pad * 2; }
-  const key = [x, y, w, h, vw, vh, t.i].map(Math.round).join(","); if (key === t.key) return; t.key = key;
+  const tip = t.root.querySelector(".tour-tip"), th = tip.offsetHeight, tw = tip.offsetWidth, m = 14;
+  const key = [x, y, w, h, vw, vh, t.i, th, tw].map(Math.round).join(","); if (key === t.key) return; t.key = key;
   const hole = t.root.querySelector(".tour-hole");
   Object.assign(hole.style, { left:x + "px", top:y + "px", width:w + "px", height:h + "px" });
   // Bloques que no dejan tocar fuera del foco; el quinto tapa el foco cuando el paso solo explica
@@ -2428,14 +2547,13 @@ function tourLayout(){
   Object.assign(b3.style, { left:0, top:px(y), width:px(Math.max(0, x)), height:px(h) });
   Object.assign(b4.style, { left:px(x + w), top:px(y), width:px(Math.max(0, vw - x - w)), height:px(h) });
   Object.assign(b5.style, { left:px(x), top:px(y), width:px(w), height:px(h), display: s.tap || s.free ? "none" : "block" });
-  const tip = t.root.querySelector(".tour-tip"), th = tip.offsetHeight, tw = tip.offsetWidth, m = 14;
   let top;
   if (!w) top = (vh - th) / 2;
   else if (vh - (y + h) >= th + m + 8) top = y + h + m;
   else if (y >= th + m + 8) top = y - th - m;
   else top = vh - th - 8;
   const left = Math.min(Math.max(16, (w ? x + w / 2 : vw / 2) - tw / 2), vw - tw - 16);
-  tip.style.transform = `translate(${Math.round(left)}px,${Math.round(Math.max(8, top))}px)`;
+  tip.style.transform = `translate(${Math.round(left)}px,${Math.round(Math.max(8, Math.min(top, vh - th - 8)))}px)`;
 }
 function tourButton(v){
   const h = $("#app header.top"); if (!h || (v !== "inicio" && !TOURS[v])) return;
@@ -2447,6 +2565,11 @@ function tourButton(v){
   else h.append(b);
 }
 
+// Redibuja sin perder el campo que se acaba de tocar (ej.: escribir la cantidad y pasar al costo)
+function renderKeepFocus(){ setTimeout(() => {
+  const a = document.activeElement, k = a && a !== document.body && a.dataset ? Object.keys(a.dataset)[0] : null, v = k && a.dataset[k];
+  render(); if (!k) return;
+  const n = document.querySelector(`[data-${k.replace(/[A-Z]/g, c => "-" + c.toLowerCase())}="${CSS.escape(v)}"]`); if (n){ n.focus(); if (n.select && n.type !== "checkbox") n.select(); } }); }
 function bindSearch(onPick){
   const q = $("#q"), res = $("#res");
   const upd = () => { const h = searchResults(q.value); res.hidden = !h; res.innerHTML = h;
@@ -2473,6 +2596,7 @@ function render(){
   const tb = $("#tourbtn"); if (tb) tb.onclick = startBasicTour;
   if (v === "inicio" && $("#tourcard")){ $("#tourgo").onclick = startBasicTour; $("#tourno").onclick = () => { tourSeen(true); render(); toast("El tutorial queda en el botón de arriba"); }; }
   if (v === "compras"){
+    app.querySelectorAll("[data-smin]").forEach(b => b.onclick = () => openMinimo(P(b.dataset.smin)));
     const gs = shopGroups();
     app.querySelectorAll("[data-sq]").forEach(i => { i.oninput = () => ui.shop[i.dataset.sq] = Math.max(0, r3(+i.value || 0)); i.onchange = softRender; });
     app.querySelectorAll("[data-scopy]").forEach(b => b.onclick = () => { const t = pedidoMsg(gs[b.dataset.scopy]);
@@ -2500,6 +2624,7 @@ function render(){
   }
   if (v === "resumen"){
     app.querySelectorAll("[data-rper]").forEach(b => b.onclick = () => { ui.resPer = b.dataset.rper; render(); });
+    $("#resxls").onclick = downloadResumen;
     loadResumen().catch(e => { const b = $("#resbox"); if (b) b.innerHTML = `<div class="card empty">${esc(friendly(e))}</div>`; });
   }
   if (v === "caja") loadCaja().catch(e => { const b = $("#cajabox"); if (b) b.innerHTML = `<div class="card empty">${esc(friendly(e))}</div>`; });
@@ -2604,13 +2729,13 @@ function render(){
     $("#scan").onclick = () => openScanSheet(scanAction());
     app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
-    app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = render);
+    app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = renderKeepFocus);
     app.querySelectorAll("[data-rbox]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rbox], n = Math.max(2, l.n || 12);
       // Al cambiar entre unidades y cajas se convierten la cantidad y el costo
       if (i.checked){ l.box = true; l.n = n; l.qty = Math.max(1, Math.round(l.qty / n)); l.cost = l.cost * n; }
       else { l.box = false; l.qty = l.qty * n; l.cost = Math.round(l.cost / n); }
       render(); });
-    app.querySelectorAll("[data-rn]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rn]; l.n = Math.max(2, Math.round(+i.value || 2)); render(); });
+    app.querySelectorAll("[data-rn]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rn]; l.n = Math.max(2, Math.round(+i.value || 2)); renderKeepFocus(); });
     $("#confirm").onclick = () => run(async () => { const n = ui.recv.items.reduce((a,l) => a + (recvUnits(l)||0), 0);
       $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
       // Un proveedor nuevo escrito a mano queda guardado en la lista
@@ -2624,6 +2749,8 @@ function render(){
       $("#back").onclick = () => { ui.sector = null; render(); };
       app.querySelectorAll("[data-cq]").forEach(i => i.oninput = () => { (ui.draft[i.dataset.cq] ||= {}).qty = i.value; });
       app.querySelectorAll("[data-ce]").forEach(i => i.onchange = () => { (ui.draft[i.dataset.ce] ||= {}).est = i.checked; });
+      app.querySelectorAll("[data-cmul]").forEach(b => b.onclick = () => openCountQty(P(b.dataset.cmul)));
+      app.querySelectorAll("[data-cmode]").forEach(b => b.onclick = () => { countAsk(b.dataset.cmode === "q"); render(); });
       app.querySelectorAll("[data-cn]").forEach(b => b.onclick = () => { const p = P(b.dataset.cn); const d = (ui.draft[p.id] ||= {}); const off = d.none ?? !p.has; d.none = !off; render(); });
       $("#scan").onclick = () => openScanSheet(scanAction());
       if ($("#addp")) $("#addp").onclick = () => openProductForm(ui.sector, "", () => render());

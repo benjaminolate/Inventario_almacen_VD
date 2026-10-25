@@ -43,11 +43,11 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 - **Ofertas y packs:** por ejemplo "3 galletas por $1.500"; el descuento se aplica solo en el carrito al juntar las unidades, y avisa cuando falta poco para completar el pack.
 - **Recepción de mercadería:** registro de lo que llega del proveedor, por unidad o **por caja** (cantidad de cajas y precio de la caja; la app lo pasa a unidades), con fecha de vencimiento opcional y total de la factura.
 - **Costos por proveedor:** lo que cuesta cada producto por unidad y por caja, el precio de venta y cuánto se gana, filtrado por proveedor.
-- **Lista de compras:** se arma sola con los productos bajo el stock mínimo, separada por proveedor, con cantidades sugeridas, pedido por WhatsApp y un botón para recibir ese pedido.
+- **Lista de compras:** se arma sola con los productos bajo el stock mínimo (que se ajusta ahí mismo), separada por proveedor, con cantidades sugeridas, pedido por WhatsApp y un botón para recibir ese pedido.
 - **Proveedores:** contacto, notas y productos de cada uno.
 - **Vencimientos:** aviso de lo que vence esta semana o ya venció, para venderlo antes o rebajarlo con una oferta.
 - **Cierre de caja:** compara lo registrado desde el último cierre con lo contado en caja, separado en efectivo (con el sencillo inicial), débito y transferencia, y guarda el historial de cierres.
-- **Conteo por sectores:** se cuenta un sector a la vez; una cantidad se puede marcar como aproximada o un producto como "No lo tenemos". Al terminar muestra las diferencias entre lo que esperaba el sistema y lo contado.
+- **Conteo por sectores:** se cuenta un sector a la vez; una caja completa se cuenta con **Cajas ×** (ej.: 4 cajas de 5) o escaneando una vez y escribiendo la cantidad; una cantidad se puede marcar como aproximada o un producto como "No lo tenemos". Al terminar muestra las diferencias entre lo que esperaba el sistema y lo contado.
 - **Productos:** catálogo precargado con 67 productos típicos de almacén en 14 sectores (incluidos pan por unidad y verduras a granel), con filtro, búsqueda, edición (nombre, precio, costo, stock mínimo, código de barras), últimos movimientos y alta de productos nuevos.
 - **Historial** de ventas, compras y conteos, con filtro por tipo.
 - **Panel de inicio:** porcentaje del inventario contado, ventas del día, avance del conteo por sector, productos bajo el stock mínimo y lo más vendido en los últimos 7 días.
@@ -76,7 +76,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 **Multiusuario (con Supabase)**
 - Inicio de sesión con usuario y contraseña; roles de administradora y vendedor/a.
 - Permisos por vendedor/a elegidos por la administradora (recibir, contar, productos, fiados, caja, proveedores, ofertas). Costos y ganancias, resumen de ventas y mensajes por WhatsApp son solo de ella hasta que los dé.
-- **Resumen de ventas:** hoy, 7 días, este mes y mes pasado, con medio de pago, ventas por día, lo más vendido y ganancia estimada.
+- **Resumen de ventas:** hoy, 7 días, este mes, mes pasado, este año y año pasado, descargable en Excel (.xlsx), con medio de pago, ventas por día, lo más vendido y ganancia estimada.
 - Todos los celulares y computadores ven el mismo stock y se actualizan en vivo.
 - El historial registra quién hizo cada movimiento, con la hora del servidor.
 
