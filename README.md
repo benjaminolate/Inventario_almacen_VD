@@ -82,6 +82,7 @@ Así se puede contar un sector por día (por ejemplo, Bebidas el lunes y Lácteo
 
 **Otros**
 - Diseño pensado para celular. **Más** separa Proveedores, Logística, Ayudas y Configuración, y cada pantalla tiene botón **Regresar** (también funciona el botón atrás del celular).
+- **Tutorial guiado opcional:** desde Inicio, un foco recorre la pantalla y explica qué tocar para vender, escanear, contar y buscar productos; la venta y el conteo de prueba no se guardan. Cada herramienta tiene además su propio botón **Tutorial**.
 - **Apariencia** por aparato: tema claro, oscuro o automático, 5 fuentes y colores personalizados.
 - **Extensiones:** fiados, pan, proveedores, vencimientos, ofertas y cierre de caja se pueden apagar en **Más > Extensiones** si la tienda no los usa.
 - **Se instala como app** (PWA) en el celular o computador, con su ícono, desde **Más > Instalar la app**.

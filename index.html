@@ -153,6 +153,32 @@ nav.tabs button[aria-current="page"]{color:var(--brand)}
 .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;overflow-wrap:anywhere}
 @media (max-width:380px){.kpi .num{font-size:24px}.grid2{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+/* Tutorial: foco que recorre la pantalla y globo con la explicación */
+.helpbtn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.helpbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tour-hole{position:fixed;z-index:9000;border-radius:14px;box-shadow:0 0 0 3px var(--accent),0 0 0 200vmax rgba(10,16,12,var(--tour-dim,.62));pointer-events:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--tour-dim:.8}}
+:root[data-theme="dark"]{--tour-dim:.8}
+.tour-hole.tap::after{content:"";position:absolute;inset:-5px;border:3px solid var(--accent);border-radius:17px;animation:tourpulse 1.5s ease-out infinite}
+@keyframes tourpulse{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.12)}}
+.tour-block{position:fixed;z-index:8999}
+.tour-tip{position:fixed;left:0;top:0;z-index:9001;width:min(340px,calc(100vw - 32px));background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,.28);opacity:0}
+.tour-tip.show{opacity:1}
+.tour-tip h4{font-family:var(--font-display);font-size:17px;margin:2px 0 6px}
+.tour-tip p{margin:0;font-size:15px;line-height:1.45}
+.tour-n{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.tour-btns{display:flex;gap:8px;align-items:center;margin-top:14px}
+.tour-btns .sp{flex:1}
+.tour-tip.nudge{animation:tournudge .35s}
+@keyframes tournudge{30%{margin-left:-6px}60%{margin-left:6px}}
+@media (prefers-reduced-motion:no-preference){
+  #tour.glide .tour-hole{transition:top .45s cubic-bezier(.2,.8,.2,1),left .45s cubic-bezier(.2,.8,.2,1),width .45s cubic-bezier(.2,.8,.2,1),height .45s cubic-bezier(.2,.8,.2,1)}
+  #tour.glide .tour-tip{transition:transform .45s cubic-bezier(.2,.8,.2,1),opacity .25s}
+  .tour-tip{transition:opacity .25s}
+}
+@media (prefers-reduced-motion:reduce){.tour-hole.tap::after{animation:none}}
+.tourcard{display:flex;gap:14px;align-items:center}
+.tourcard svg{width:34px;height:34px;flex:none;stroke:var(--brand);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 </style>
 </head>
 <body>
@@ -1018,7 +1044,8 @@ const ICONS = {
   respaldo:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>',
   instalar:'<svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M12 7v7M9 11l3 3 3-3M10.5 18.5h3"/></svg>',
   apariencia:'<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.4-.7-2.3 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7.3" r="1.2"/><circle cx="14.5" cy="7.3" r="1.2"/></svg>',
-  ajustes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>'
+  ajustes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  ayuda:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.5"/><path d="M12 16.8v.2"/></svg>'
 };
 const LABELS = { inicio:"Inicio", vender:"Vender", contar:"Contar", productos:"Productos", fiados:"Fiados", mas:"Más" };
 const IN_MAS = ["resumen","costos","pagina","respaldo","instalar","mas","recibir","historial","reservas","equipo","compras","proveedores","vencimientos","ofertas","caja","extensiones","apariencia","tiposdepan"];
@@ -1050,6 +1077,8 @@ function viewInicio(){
   return `${isDB() ? header(db.ajustes.tienda_nombre || "Almacén", "Sistema de inventario") : header("Almacén", "Sistema de inventario · demo")}
   <div class="stack">
     ${isDB() ? "" : `<div class="demo-banner"><span>Demo con datos ficticios de ejemplo.</span><button class="btn sm" id="reset">Reiniciar demo</button></div>`}
+    ${tourSeen() ? "" : `<div class="card stack" id="tourcard"><div class="tourcard">${ICONS.ayuda}<div><b>¿Primera vez usando la app?</b><div class="small muted">Un recorrido guiado por lo básico: vender, escanear, contar y productos. Es opcional y no guarda nada.</div></div></div>
+      <div class="grid2"><button class="btn" id="tourno">Ahora no</button><button class="btn primary" id="tourgo">Empezar tutorial</button></div></div>`}
     ${ext("pan") && can("whatsapp") ? `<button class="panbtn" id="panbtn">${ICONS.pan}<span><b>Avisar que llegó el pan</b><small>Envía el mensaje al grupo de WhatsApp de clientes</small></span></button>` : ""}
     ${vSoon.length ? `<button class="sector" data-go="vencimientos"><span class="name">Vence esta semana</span><span class="pill ${vSoon.some(m => diasPara(m.vence) < 0) ? "bad" : "warn"}">${vSoon.length} ${vSoon.length === 1 ? "producto" : "productos"}</span><span class="sub">${esc(vSoon.slice(0,3).map(m => P(m.pid)?.name || "Producto").join(", "))}. Conviene venderlo antes o rebajarlo.</span></button>` : ""}
     ${resPend.length ? `<button class="sector" data-go="reservas"><span class="name">Reservas de pan de hoy</span><span class="pill warn">${resPend.length} por entregar</span><span class="sub">Toca para ver quién reservó y marcar lo entregado</span></button>` : ""}
@@ -1200,7 +1229,7 @@ function viewRecibir(){
   const cc = can("costos"), total = ui.recv.items.reduce((a,l)=>a+lineMoney(l.qty, l.cost),0), venc = ext("vencimientos"), anyBox = ui.recv.items.some(l => l.box);
   return `${backMasHtml()}${header("Recibir mercadería", "Lo que llega del proveedor").replace(netPill(), "")}
   <div class="stack">
-    <div class="field"><label for="sup">Proveedor o distribuidora</label>
+    <div class="field" id="supfield"><label for="sup">Proveedor o distribuidora</label>
       ${(S.proveedores || []).length ? `<div class="chips" style="flex-wrap:wrap">${S.proveedores.slice().sort((a,b) => a.name.localeCompare(b.name)).map(v => `<button class="chip" data-rprov="${v.id}" aria-pressed="${ui.recv.provId === v.id}">${esc(v.name)}</button>`).join("")}</div>` : ""}
       <input class="input" id="sup" value="${esc(ui.recv.supplier)}" list="provlist" autocomplete="off" placeholder="Toca una de arriba o escribe una nueva">
       <datalist id="provlist">${(S.proveedores || []).map(v => `<option value="${esc(v.name)}">`).join("")}</datalist>
@@ -1208,7 +1237,7 @@ function viewRecibir(){
     <div class="searchbar"><input class="input" id="q" placeholder="Buscar producto recibido" autocomplete="off"><button class="btn accent" id="scan">Escanear</button></div>
     <div class="list card" id="res" style="padding-block:0" hidden></div>
     <div id="provpicks">${provPicks()}</div>
-    <div class="card">
+    <div class="card" id="recvlist">
       <h3>Productos recibidos</h3>
       ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid); return `<div class="countrow" style="grid-template-columns:${cc ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div></div>
         <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
@@ -2165,10 +2194,10 @@ function viewMas(){
       ext("ofertas") ? opt("ofertas","ofertas","Ofertas y packs", `${nOfe} ${nOfe === 1 ? "oferta activa" : "ofertas activas"}`) : "",
       ext("caja") ? opt("caja","caja","Cierre de caja","Cuadrar efectivo, débito y transferencia") : "",
       opt("historial","historial","Historial","Todo lo que entra, sale y se cuenta")])}
-    ${sec("Ayudas", ext("pan") ? [
+    ${sec("Ayudas", [`<button class="sector" id="tourbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.ayuda}</span>Tutorial</span><span></span><span class="sub">Recorrido guiado por lo básico: vender, escanear, contar y productos</span></button>`].concat(ext("pan") ? [
       can("whatsapp") ? `<button class="sector" id="panbtn"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.pan}</span>Avisar que llegó el pan</span><span></span><span class="sub">Mensaje al grupo de WhatsApp de clientes</span></button>` : "",
       opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa")),
-      opt("tiposdepan","pan","Tipos de pan", `${nPan} ${nPan === 1 ? "tipo" : "tipos"} · precio por unidad y botones rápidos`)] : [])}
+      opt("tiposdepan","pan","Tipos de pan", `${nPan} ${nPan === 1 ? "tipo" : "tipos"} · precio por unidad y botones rápidos`)] : []))}
     ${sec("Configuración", [
       isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : "",
       opt("pagina","pagina","Página de la tienda","Links para clientes: reseñas, grupo de WhatsApp, reservas y QR"),
@@ -2177,6 +2206,245 @@ function viewMas(){
       opt("extensiones","ajustes","Extensiones","Encender o apagar partes de la app"),
       opt("apariencia","apariencia","Apariencia","Tema claro u oscuro, fuente y colores")])}
   </div>`;
+}
+
+// ---------- Tutorial: recorrido guiado opcional ----------
+// Un foco recorre la pantalla y un globo explica qué tocar. Lo que se hace durante el tutorial no se guarda:
+// la venta y el conteo de prueba se deshacen al salir.
+const TOUR_KEY = "almacen-tutorial";
+function tourSeen(set){ try { if (set) localStorage.setItem(TOUR_KEY, "1"); return localStorage.getItem(TOUR_KEY) === "1"; } catch(e){ return true; } }
+const pause = ms => new Promise(r => setTimeout(r, ms));
+const st = (el, title, text, more) => ({ el, title, text, ...more });
+
+function basicTour(){
+  const ok = p => p.has && p.price > 0 && !isKg(p);
+  const demo = S.products.find(p => ok(p) && p.cat !== "Pan") || S.products.find(ok);
+  const fiados = ext("fiados") && can("fiados");
+  return [
+    st(null, "Bienvenida", "Te muestro lo básico de la app: vender, escanear, contar y el catálogo. Puedes salir cuando quieras. Lo que hagas durante el tutorial no se guarda."),
+    st('#tabs [data-view="vender"]', "Vender", "Todo parte aquí. Toca <b>Vender</b>.", { tap:true }),
+    st("#q", "Busca el producto", "Escribe parte del nombre. No importan las tildes ni las mayúsculas, y si te equivocas en una letra igual lo encuentra.", { type: demo && demo.name.toLowerCase() }),
+    demo && st(`#res [data-pick="${demo.id}"]`, "Agrégalo a la venta", "Toca el producto y queda en la venta. Si un producto todavía no tiene precio, la app lo pregunta una sola vez y lo guarda.", { tap:true }),
+    demo && st(".cartline .stepper", "Cantidad", "Con <b>+</b> y <b>−</b> cambias cuántas unidades lleva. Pruébalo.", { free:true }),
+    st("#scan", "Escanear", "Abre la cámara para leer el código de barras. Con la pistola lectora es más fácil: solo dispara y el producto se suma, sin tocar la pantalla."),
+    st(() => $("[data-medio]")?.parentElement, "Medio de pago", "Elige efectivo, débito o transferencia. En efectivo, escribe con cuánto paga y la app calcula el vuelto."),
+    st("#confirm", "Confirmar la venta", "Al terminar se toca <b>Confirmar venta</b> y el stock baja solo. Ahora no la confirmamos: esta venta de prueba se borra al salir del tutorial."),
+    ...(can("contar") ? [
+      st('#tabs [data-view="contar"]', "Contar", "Así se carga lo que hay de verdad en la estantería, un sector a la vez. Toca <b>Contar</b>.", { tap:true }),
+      st("[data-sector]", "Elige un sector", "Cada sector queda al día desde su propio conteo, así que se puede contar uno por día. Toca este para ver cómo es.", { tap:true }),
+      st(".countrow:not(.off)", "Escribe lo que hay", "Anota cuántas unidades hay en la estantería. Si no estás segura, marca <b>Es aproximado</b>. Si la tienda no vende ese producto, toca <b>No lo tenemos</b> y desaparece de las listas.", { free:true }),
+      st("#scan", "Contar escaneando", "También se puede escanear: cada lectura suma 1 a ese producto."),
+      st("#finish", "Terminar conteo", "Al final se toca <b>Terminar conteo</b>: el sector queda al día y la app muestra lo que faltó o sobró. Ahora no lo guardamos.")] : []),
+    st('#tabs [data-view="productos"]', "Productos", "Aquí está todo el catálogo de la tienda. Toca <b>Productos</b>.", { tap:true }),
+    st("#pq", "Buscar en el catálogo", "Busca igual que al vender. Abajo se ve el precio, el sector y cuánto queda de cada uno."),
+    st('[data-f="Sin precio"]', "Lo que falta por completar", "Este filtro muestra los productos que todavía no tienen precio, para irlos completando con calma."),
+    st("[data-open]", can("productos") ? "Cambiar un producto" : "Ver un producto", can("productos") ? "Toca cualquiera para cambiar el precio, el código de barras o el stock mínimo." : "Toca cualquiera para ver cuánto queda y sus últimos movimientos."),
+    ...(fiados ? [
+      st('#tabs [data-view="fiados"]', "Fiados", "El cuaderno de fiados de la tienda. Toca <b>Fiados</b>.", { tap:true }),
+      st("#addc", "Anotar un fiado", "Agrega al cliente una vez. Después, al tocar su nombre, anotas lo que lleva fiado y lo que abona.")] : []),
+    st('#tabs [data-view="mas"]', "Más herramientas", "Aquí está el resto: recibir mercadería, proveedores, ofertas, cierre de caja y más. Toca <b>Más</b>.", { tap:true }),
+    st("#tourbtn", "Tutoriales", "Este recorrido se repite aquí o desde Inicio. Y dentro de cada herramienta, el botón <b>Tutorial</b> de arriba explica cómo se usa esa pantalla.")
+  ];
+}
+
+// Tutorial corto de cada pantalla: solo explica, no toca nada
+const TOURS = {
+  vender: () => [
+    st("#q", "Buscar", "Escribe parte del nombre del producto y tócalo en la lista para agregarlo."),
+    st("#scan", "Escanear", "Lee el código de barras con la cámara. Con la pistola lectora no hace falta tocar nada: solo dispara."),
+    st(".quick", "Botones rápidos", "Lo que más se vende (como el pan) queda aquí a un toque. Se eligen en cada producto."),
+    st(".cartline .stepper", "Cantidad", "Con + y − cambias cuántas unidades lleva."),
+    st(() => $("[data-medio]")?.parentElement, "Medio de pago", "Efectivo, débito o transferencia. En efectivo la app calcula el vuelto."),
+    st("#confirm", "Confirmar", "Registra la venta y descuenta el stock. Sin internet queda guardada en el celular y se envía sola después.")],
+  contar: () => ui.sector ? [
+    st(".countrow:not(.off)", "Escribe lo que hay", "Anota las unidades que hay en la estantería. Marca Es aproximado si no estás segura."),
+    st("[data-cn]", "No lo tenemos", "Si la tienda no vende ese producto, tócalo y desaparece de las listas."),
+    st("#scan", "Escanear", "Cada lectura suma 1 al producto escaneado."),
+    st("#addp", "Agregar producto", "Si en la estantería hay algo que no está en la lista, agrégalo aquí."),
+    st("#finish", "Terminar conteo", "Guarda el sector y muestra lo que faltó o sobró. Lo vendido desde ese momento se descuenta solo.")] : [
+    st("[data-sector]", "Sectores", "Elige el sector que vas a contar. Cada uno queda al día desde su propio conteo, así que se puede contar uno por día."),
+    st(".sector .pill", "Estado", "Aquí se ve si el sector ya está contado o cuántos productos faltan.")],
+  productos: () => [
+    st("#pq", "Buscar", "Busca cualquier producto del catálogo, aunque esté mal escrito."),
+    st(() => $("[data-f]")?.parentElement, "Filtrar por sector", "Muestra solo un sector. <b>Sin precio</b> junta lo que falta por completar."),
+    st("[data-open]", "Cada producto", can("productos") ? "Tócalo para cambiar precio, código de barras, stock mínimo o proveedor." : "Tócalo para ver cuánto queda y sus últimos movimientos."),
+    st("#addp", "Agregar", "Para un producto nuevo que no está en el catálogo.")],
+  fiados: () => [
+    st(".card.kpi", "Total por cobrar", "Lo que deben entre todos los clientes."),
+    st("#addc", "Agregar cliente", "Se agrega una vez, con su celular si quieres mandarle recordatorios."),
+    st("[data-client]", "Cada cliente", `Toca su nombre para anotar un fiado o un abono${can("whatsapp") ? " y mandarle un recordatorio por WhatsApp" : ""}.`)],
+  recibir: () => [
+    st("#supfield", "Proveedor", "Toca la distribuidora que llegó o escribe una nueva. Las nuevas quedan guardadas."),
+    st("#provpicks .card", "Sus productos", "Los productos asociados a ese proveedor aparecen aquí: tócalos y se agregan sin buscar."),
+    st("#q", "Buscar o escanear", "Para lo que no está arriba, búscalo por nombre o escanéalo."),
+    st("#recvlist", "Cantidades", can("costos") ? "Escribe cuánto llegó y el costo. Marca <b>Por caja</b> si viene en cajas: la app lo pasa a unidades." : "Escribe cuánto llegó. Marca <b>Por caja</b> si viene en cajas: la app lo pasa a unidades."),
+    st("#confirm", "Guardar", "Al guardar, el stock sube al tiro" + (can("costos") ? " y se actualiza el costo de cada producto." : "."))],
+  historial: () => [
+    st(() => $("[data-hf]")?.parentElement, "Filtrar", "Elige ver solo ventas, compras o conteos."),
+    st(".movrow, #app .card .list .item", "Movimientos", "Lo más nuevo arriba, con quién lo hizo y a qué hora.")],
+  proveedores: () => [
+    st("#addv", "Agregar proveedor", "Con su nombre y celular. Con el celular, la lista de compras le manda el pedido por WhatsApp."),
+    st("[data-prov]", "Cada proveedor", "Tócalo para cambiar sus datos y asociarle sus productos. Así aparecen solos al recibir mercadería.")],
+  costos: () => [
+    st(() => $("[data-cprov]")?.parentElement, "Por proveedor", "Muestra solo los productos de un proveedor."),
+    st("[data-csec]", "Por sector", "Toca un sector para abrirlo. Al lado se ve la ganancia promedio."),
+    st("[data-cost]", "Cada producto", "Costo, precio de venta y cuánto se gana. Tócalo para cambiar el costo o el precio.")],
+  compras: () => [
+    st("#app .card", "Pedido por proveedor", "Se arma solo con lo que bajó del mínimo, separado por proveedor. Cuando algo contado baja de su mínimo, aparece aquí."),
+    st("[data-sq]", "Cantidad a pedir", "Ajusta cuánto pedir. Con 0 sale del pedido."),
+    st("[data-scopy]", "Enviar el pedido", can("whatsapp") ? "Pídelo por WhatsApp o copia el texto para mandarlo por otro lado." : "Copia el texto del pedido para mandarlo."),
+    st("[data-srecv]", "Cuando llegue", "Abre Recibir mercadería con este pedido ya cargado, para revisar y guardar.")],
+  resumen: () => [
+    st(() => $("[data-rper]")?.parentElement, "Período", "Hoy, esta semana, este mes o el mes pasado."),
+    st("#resbox", "El resumen", "Total vendido, ganancia, cuánto entró por cada medio de pago, los mejores días y lo más vendido.", { wait:2500 })],
+  vencimientos: () => [
+    st("#app .card", "Por vencer", "Lo vencido y lo que vence esta semana, según las fechas anotadas al recibir."),
+    st("[data-voferta]", "Rebajarlo", "Crea una oferta para venderlo antes de que venza."),
+    st("[data-vok]", "Resuelto", "Cuando ya se vendió o se retiró, márcalo y deja de aparecer.")],
+  ofertas: () => [
+    st("#addo", "Nueva oferta", "Por ejemplo, 3 galletas por $1.500."),
+    st("[data-ofe]", "Cada oferta", "Tócala para cambiarla o pausarla. Al vender, el descuento se aplica solo cuando se juntan las unidades.")],
+  caja: () => [
+    st("#cfondo", "Fondo de caja", "El efectivo con que partió la caja.", { wait:2500 }),
+    st(() => $("[data-cc]")?.closest(".card"), "Lo que hay de verdad", "Cuenta el efectivo y revisa débito y transferencias. La app compara con lo que registró.", { wait:2500 }),
+    st("#cclose", "Cerrar caja", "Guarda el cierre y muestra si cuadró, faltó o sobró.", { wait:2500 })],
+  reservas: () => isDB() ? [
+    st(() => $("[data-rday]")?.parentElement, "Hoy o mañana", "Las reservas que hacen los clientes desde su celular aparecen aquí al instante."),
+    st("[data-res]", "Cada reserva", "Tócala para marcarla como entregada."),
+    st("#rcopy", "Link para clientes", "Compártelo en el grupo de WhatsApp para que reserven."),
+    st("#ropen", "Abrir o cerrar", "Apaga las reservas cuando no quieras recibir más.")] : [
+    st("[data-res]", "Cada reserva", "Tócala para marcarla como entregada."),
+    st("#rn", "Vista del cliente", "Así se ve la reserva desde el celular del cliente.")],
+  tiposdepan: () => [
+    st("#addpan", "Agregar pan", "Con su precio por unidad."),
+    st("[data-pan]", "Cada pan", "Tócalo para cambiar el precio, ponerle botón rápido en Vender o dejarlo reservable.")],
+  equipo: () => [
+    st("#mypass", "Tu contraseña", "Para cambiar la contraseña con que entras."),
+    st("#addu", "Agregar persona", "Crea la cuenta de un vendedor con su usuario y contraseña."),
+    st("[data-user]", "Permisos", "Toca a una persona para elegir qué puede hacer: recibir, contar, fiados, caja y más."),
+    st("#tname", "Nombre de la tienda", "El nombre que ven los clientes en la página y en las reservas.")],
+  respaldo: () => [
+    st("#backup", "Descargar", "Baja un archivo con todos los datos. Guárdalo en Drive o mándalo a tu WhatsApp."),
+    st(".filebtn", "Restaurar", "Si algo falla, carga ese archivo y los datos vuelven. Solo agrega lo que falta.")],
+  pagina: () => [
+    st("#app .card.stack", "El link de la tienda", "Una página con todos los links del almacén. Compártela por WhatsApp o imprime el código QR para el mostrador."),
+    st(() => $("#pgfoto")?.closest(".card"), "Presentación", "Foto o logo, descripción, dirección y horario."),
+    st("#pgadd", "Links", "Agrega reseñas de Google, el grupo de WhatsApp, Instagram y más.")],
+  extensiones: () => [
+    st("[data-ext]", "Encender o apagar", "Lo apagado desaparece de los menús. No se pierde nada de lo anotado.")],
+  apariencia: () => [
+    st("[data-theme-set]", "Tema", "Claro, oscuro o automático."),
+    st("[data-font]", "Fuente", "Elige la letra que se lea mejor."),
+    st(".swatches", "Colores", "Cambia los colores de la app en este aparato.")]
+};
+
+let tour = null;
+function startBasicTour(){ startTour(basicTour(), true); }
+function startTour(steps, basic){
+  endTour(false);
+  steps = steps.filter(Boolean); if (!steps.length) return;
+  const root = document.createElement("div"); root.id = "tour";
+  root.innerHTML = `<div class="tour-hole"></div>${"<div class=\"tour-block\"></div>".repeat(5)}<div class="tour-tip" role="dialog" aria-live="polite"></div>`;
+  document.body.appendChild(root);
+  tour = { steps, i:-1, seq:0, root, basic, el:null, glideUntil:0,
+    snap: basic ? JSON.parse(JSON.stringify({ cart:ui.cart, draft:ui.draft, sector:ui.sector, medio:ui.medio })) : null };
+  root.querySelectorAll(".tour-block").forEach(b => b.onclick = () => { const t = root.querySelector(".tour-tip"); t.classList.remove("nudge"); void t.offsetWidth; t.classList.add("nudge"); });
+  document.addEventListener("click", tourClick, true);
+  document.addEventListener("keydown", tourKey);
+  tourStep(0, 1); tourFollow();
+}
+function endTour(done){
+  const t = tour; if (!t) return; tour = null;
+  document.removeEventListener("click", tourClick, true); document.removeEventListener("keydown", tourKey);
+  t.root.remove();
+  if (t.snap){ Object.assign(ui, t.snap); ui.paga = 0; if (MODE) render(); }
+  if (t.basic) tourSeen(true);
+  if (done) toast(t.basic ? "Tutorial terminado" : "Listo");
+}
+function tourKey(e){ if (e.key === "Escape") endTour(false); }
+window.addEventListener("popstate", () => endTour(false));
+function tourClick(e){
+  const t = tour; if (!t || e.target.closest(".tour-tip")) return;
+  const s = t.steps[t.i];
+  if (s?.tap && t.el && t.el.contains(e.target)){ const i = t.i; setTimeout(() => tour === t && t.i === i && tourStep(i + 1, 1), 60); }
+}
+const tourFind = s => { const el = typeof s.el === "function" ? s.el() : $(s.el); if (!el) return null; const r = el.getBoundingClientRect(); return r.width || r.height ? el : null; };
+async function tourStep(i, dir){
+  const t = tour; if (!t) return;
+  const seq = ++t.seq;
+  if (i >= t.steps.length) return endTour(true);
+  if (i < 0) return tourStep(0, 1);
+  const s = t.steps[i], tip = t.root.querySelector(".tour-tip");
+  t.i = i; tip.classList.remove("show");
+  let el = null;
+  if (s.el){
+    const wait = s.wait || (t.steps[i - 1]?.tap ? 1500 : 150), t0 = Date.now();
+    while (!(el = tourFind(s)) && Date.now() - t0 < wait){ await pause(50); if (tour !== t || t.seq !== seq) return; }
+    if (!el) return tourStep(i + dir, dir);
+    // Primero se mueve la página hasta el elemento y después el foco se desliza hacia él
+    const r = el.getBoundingClientRect();
+    if (r.top < 70 || r.bottom > innerHeight - 90){
+      el.scrollIntoView({ block:"center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      let last = null, still = 0; const t1 = Date.now();
+      while (still < 4 && Date.now() - t1 < 900){ await new Promise(requestAnimationFrame); const y = el.getBoundingClientRect().top; still = y === last ? still + 1 : 0; last = y; }
+      if (tour !== t || t.seq !== seq) return;
+    }
+  }
+  t.el = el;
+  const n = t.steps.length, last = i === n - 1, back = i > 0 && !t.steps[i - 1].tap;
+  tip.innerHTML = `<div class="tour-n">${i + 1} de ${n}</div><h4>${esc(s.title)}</h4><p>${s.text}</p>
+    <div class="tour-btns"><button class="btn ghost sm" data-tq>Salir</button><span class="sp"></span>${back ? `<button class="btn sm" data-tb>Atrás</button>` : ""}<button class="btn primary sm" data-tn>${last ? "Terminar" : "Siguiente"}</button></div>`;
+  tip.querySelector("[data-tq]").onclick = () => endTour(false);
+  if (back) tip.querySelector("[data-tb]").onclick = () => tourStep(i - 1, -1);
+  // En los pasos de "toca aquí", Siguiente hace el toque por la persona
+  tip.querySelector("[data-tn]").onclick = () => s.tap && t.el?.isConnected ? t.el.click() : tourStep(i + 1, 1);
+  t.root.querySelector(".tour-hole").classList.toggle("tap", !!s.tap);
+  t.root.classList.add("glide"); t.glideUntil = Date.now() + 480;
+  tourLayout(); requestAnimationFrame(() => tip.classList.add("show"));
+  setTimeout(() => { if (tour === t && t.seq === seq) t.root.classList.remove("glide"); }, 480);
+  if (s.type && el){ el.value = ""; el.dispatchEvent(new Event("input")); await pause(500);
+    for (const ch of s.type){ if (tour !== t || t.seq !== seq) return; el.value += ch; el.dispatchEvent(new Event("input")); await pause(45); } }
+}
+// Mantiene el foco sobre el elemento aunque la pantalla se redibuje o se haga scroll
+function tourFollow(){
+  const t = tour; if (!t) return;
+  const s = t.steps[t.i];
+  if (s?.el && t.el && !t.el.isConnected){ const el = tourFind(s); if (el) t.el = el; }
+  if (Date.now() > t.glideUntil) tourLayout();
+  requestAnimationFrame(tourFollow);
+}
+function tourLayout(){
+  const t = tour; if (!t || t.i < 0) return;
+  const s = t.steps[t.i], vw = innerWidth, vh = innerHeight, pad = 6;
+  let x = vw / 2, y = vh / 2, w = 0, h = 0;
+  if (t.el && s.el){ const r = t.el.getBoundingClientRect(); x = r.left - pad; y = r.top - pad; w = r.width + pad * 2; h = r.height + pad * 2; }
+  const key = [x, y, w, h, vw, vh, t.i].map(Math.round).join(","); if (key === t.key) return; t.key = key;
+  const hole = t.root.querySelector(".tour-hole");
+  Object.assign(hole.style, { left:x + "px", top:y + "px", width:w + "px", height:h + "px" });
+  // Bloques que no dejan tocar fuera del foco; el quinto tapa el foco cuando el paso solo explica
+  const [b1, b2, b3, b4, b5] = t.root.querySelectorAll(".tour-block"), px = v => v + "px";
+  Object.assign(b1.style, { left:0, top:0, width:"100%", height:px(Math.max(0, y)) });
+  Object.assign(b2.style, { left:0, top:px(y + h), width:"100%", height:px(Math.max(0, vh - y - h)) });
+  Object.assign(b3.style, { left:0, top:px(y), width:px(Math.max(0, x)), height:px(h) });
+  Object.assign(b4.style, { left:px(x + w), top:px(y), width:px(Math.max(0, vw - x - w)), height:px(h) });
+  Object.assign(b5.style, { left:px(x), top:px(y), width:px(w), height:px(h), display: s.tap || s.free ? "none" : "block" });
+  const tip = t.root.querySelector(".tour-tip"), th = tip.offsetHeight, tw = tip.offsetWidth, m = 14;
+  let top;
+  if (!w) top = (vh - th) / 2;
+  else if (vh - (y + h) >= th + m + 8) top = y + h + m;
+  else if (y >= th + m + 8) top = y - th - m;
+  else top = vh - th - 8;
+  const left = Math.min(Math.max(16, (w ? x + w / 2 : vw / 2) - tw / 2), vw - tw - 16);
+  tip.style.transform = `translate(${Math.round(left)}px,${Math.round(Math.max(8, top))}px)`;
+}
+function tourButton(v){
+  const h = $("#app header.top"); if (!h || (v !== "inicio" && !TOURS[v])) return;
+  const b = document.createElement("button"); b.className = "btn sm helpbtn"; b.innerHTML = `${ICONS.ayuda}<span>Tutorial</span>`;
+  b.setAttribute("aria-label", v === "inicio" ? "Tutorial de lo básico" : "Tutorial de esta pantalla");
+  b.onclick = () => v === "inicio" ? startBasicTour() : startTour(TOURS[v]());
+  const last = h.lastElementChild;
+  if (last && last !== h.firstElementChild){ const w = document.createElement("div"); w.className = "row"; w.style.flexWrap = "nowrap"; h.insertBefore(w, last); w.append(last, b); }
+  else h.append(b);
 }
 
 function bindSearch(onPick){
@@ -2201,6 +2469,9 @@ function render(){
     pagina:viewPagina, respaldo:viewRespaldo, instalar:viewInstalar, resumen:viewResumen })[v]();
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   const pb = $("#panbtn"); if (pb) pb.onclick = openPan;
+  tourButton(v);
+  const tb = $("#tourbtn"); if (tb) tb.onclick = startBasicTour;
+  if (v === "inicio" && $("#tourcard")){ $("#tourgo").onclick = startBasicTour; $("#tourno").onclick = () => { tourSeen(true); render(); toast("El tutorial queda en el botón de arriba"); }; }
   if (v === "compras"){
     const gs = shopGroups();
     app.querySelectorAll("[data-sq]").forEach(i => { i.oninput = () => ui.shop[i.dataset.sq] = Math.max(0, r3(+i.value || 0)); i.onchange = softRender; });
