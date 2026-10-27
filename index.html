@@ -249,6 +249,7 @@ function rng(seed){ return () => { seed = (seed * 1664525 + 1013904223) % 429496
 
 function atDay(daysAgo, hour, min){ const d = new Date(Date.now() - daysAgo*D); d.setHours(hour, min||0, 0, 0); return d.getTime(); }
 
+const PAN_MSG = "🍞 ¡Llegó el pan calentito! Marraquetas y hallullas recién salidas. Los esperamos en el almacén.";
 function buildSeed(){
   const r = rng(42);
   const products = CATALOG.map((c, i) => ({ id:"p"+i, name:c[0], cat:c[1], price:c[2], cost:c[3], pop:c[4],
@@ -346,7 +347,7 @@ function seedExtras(){
         { id:uid(), type:"fiado", amount:1990, note:"Leche y yogur", at:atDay(5,18,0) },
         { id:uid(), type:"abono", amount:1990, note:"", at:atDay(2,18,30) } ] }
     ],
-    panMsg: "🍞 ¡Llegó el pan calentito! Marraquetas y hallullas recién salidas. Los esperamos en el almacén.",
+    panMsg: PAN_MSG,
     reservas: [
       { id:uid(), name:"Ana Ejemplo", detail:"10 marraquetas, 4 hallullas", at:resSeedAt(0), done:true },
       { id:uid(), name:"Luis Ficticio", detail:"6 hallullas", at:resSeedAt(1), done:false },
@@ -463,6 +464,8 @@ async function all(build){ const out = []; for (let from = 0; ; from += 1000){ c
 function upsert(list, obj){ const cur = list.find(x => x.id === obj.id); if (cur) return Object.assign(cur, obj); list.push(obj); return obj; }
 function friendly(e){
   const m = (e && (e.message || e.error_description)) || String(e || "");
+  if (/por_caja/.test(m)) return CAJA_MSG;
+  if (e?.code === "23514" || /violates check constraint/i.test(m)) return "Hay un número fuera de lo permitido. Revisa lo que escribiste e intenta de nuevo.";
   if (e?.code === "23505") return "Ese código de barras ya está en otro producto";
   if (/Failed to fetch|NetworkError|Load failed|sin conexión/i.test(m)) return "Sin conexión a internet. No se guardó; intenta de nuevo.";
   if (/Invalid login credentials/i.test(m)) return "Usuario o contraseña incorrectos";
@@ -471,6 +474,9 @@ function friendly(e){
   if (/Password should be/i.test(m)) return "La contraseña debe tener al menos 6 caracteres";
   return m || "Algo salió mal";
 }
+// Unidades por caja: vacío = sin dato; si no, un número entero entre 2 y 1000 (lo mismo que acepta la base de datos)
+const CAJA_MSG = "Las unidades por caja deben ser un número entero entre 2 y 1000. Déjalo vacío si no viene en caja.";
+const cajaVal = v => { v = String(v ?? "").trim(); if (!v) return null; const n = +v; return Number.isInteger(n) && n >= 2 && n <= 1000 ? n : undefined; };
 let busy = false;
 async function run(fn){ if (busy) return; busy = true; try { return await fn(); } catch(e){ console.error(e); toast(friendly(e)); } finally { busy = false; } }
 
@@ -498,7 +504,7 @@ async function dbLoadAll(){
   // Se reemplaza el contenido manteniendo los mismos objetos de productos, por si hay una ventana abierta
   const prev = S?.products || [];
   S = { products: prods.map(r => { const o = prodFromRow(r), cur = prev.find(p => p.id === o.id); return cur ? Object.assign(cur, o) : o; }),
-    movs: movs.map(movFromRow), clients: cs, reservas: res.map(resFromRow), panMsg: db.ajustes.mensaje_pan || "",
+    movs: movs.map(movFromRow), clients: cs, reservas: res.map(resFromRow), panMsg: db.ajustes.mensaje_pan || PAN_MSG,
     proveedores: provs.map(provFromRow), ofertas: ofertas.map(ofeFromRow), cierres: cierres.map(cieFromRow), vencs: vencs.map(movFromRow) };
   db.loadedAt = Date.now(); db.offline = false;
   saveCopy(); applyPending();
@@ -1247,7 +1253,7 @@ function viewRecibir(){
           ${p.cost || l.cost ? "" : `<div class="small" style="color:var(--warn);font-weight:600">Sin costo: escríbelo ${l.box ? "por caja" : isKg(p) ? "por kilo" : "por unidad, o marca Por caja"}</div>`}</div>
         <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
         ${c ? `<input class="input" type="number" min="0" inputmode="numeric" value="${l.cost || ""}" placeholder="${l.box ? "Caja $" : isKg(p) ? "$ kg" : "$ c/u"}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">` : ""}
-        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades${c && l.cost ? ` a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : ""}` : "unidades"}</span></div>`}
+        ${isKg(p) ? "" : `<div class="opts"><label class="row" style="gap:6px"><input type="checkbox" data-rbox="${i}" ${l.box ? "checked" : ""}> Por caja de</label><input class="input" style="width:64px;font-size:14px;padding:6px 8px" type="number" min="2" max="1000" inputmode="numeric" value="${l.n || 12}" data-rn="${i}" aria-label="Unidades por caja"><span class="muted">${l.box ? `= ${recvUnits(l)} unidades${c && l.cost ? ` a ${clp(Math.round(l.cost / (l.n || 1)))} c/u` : ""}` : "unidades"}</span></div>`}
         ${venc ? `<div class="opts"><label for="rv${i}">Vence</label><input class="input" style="width:auto;font-size:14px;font-weight:500;padding:6px 8px" type="date" id="rv${i}" value="${esc(l.vence || "")}" data-rv="${i}"><span class="muted">opcional</span></div>` : ""}</div>`; }).join("") +
         `<div class="row small muted" style="justify-content:flex-end;gap:24px;padding-top:6px"><span>${anyBox ? "cantidad o cajas" : "cantidad"}</span>${anyC ? `<span>${anyBox ? "costo c/u o caja" : "costo c/u"}</span>` : ""}</div>`
         : `<div class="empty">Agrega los productos de la factura. Ejemplo: 2 cajas de Coca-Cola 1,5 L = 24 unidades.</div>`}
@@ -1255,6 +1261,8 @@ function viewRecibir(){
     </div>
     ${venc ? `<p class="small muted" style="margin:0">Anota la fecha de vencimiento de lo perecible (lácteos, cecinas, pan envasado) y la app avisa en Inicio lo que vence esta semana.</p>` : ""}
     <button class="btn primary block" id="confirm" ${ui.recv.items.length?"":"disabled"}>Guardar recepción</button>
+    ${ui.recv.items.length || ui.recv.supplier ? `<button class="btn ghost block" id="rdiscard">Descartar y empezar de nuevo</button>
+    <p class="small muted" style="margin:0;text-align:center">Lo anotado queda guardado aunque salgas de esta pantalla, hasta que lo guardes o lo descartes.</p>` : ""}
   </div>`;
 }
 // Al elegir un proveedor aparecen sus productos para tocarlos sin buscar
@@ -1368,7 +1376,7 @@ function openProduct(p){
       <div class="field"><label for="eb">Código de barras</label><input class="input code" id="eb" value="${esc(p.barcode)}" placeholder="Sin código"></div>
     </div>
     <div class="field"><label for="en">Nombre</label><input class="input" id="en" value="${esc(p.name)}"></div>
-    ${isKg(p) ? "" : `<div class="field"><label for="ebx">Unidades por caja del proveedor</label><input class="input" id="ebx" type="number" min="2" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12 (opcional)"></div>`}
+    ${isKg(p) ? "" : `<div class="field"><label for="ebx">Unidades por caja del proveedor</label><input class="input" id="ebx" type="number" min="2" max="1000" step="1" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12 (opcional)"></div>`}
     ${ext("proveedores") ? `<div class="field"><label for="ev">Proveedor</label><select class="input" id="ev"><option value="">Sin proveedor</option>${(S.proveedores || []).map(v => `<option value="${v.id}" ${v.id === p.provId ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select></div>` : ""}
     <div class="field"><label for="eu">Se vende</label><select class="input" id="eu"><option value="un" ${!isKg(p) ? "selected" : ""}>Por unidad</option><option value="kg" ${isKg(p) ? "selected" : ""}>A granel, por kilo (precio por kg)</option></select></div>
     <label class="row"><input type="checkbox" id="eq" ${p.atajo ? "checked" : ""}> Botón rápido en Vender</label>
@@ -1380,7 +1388,7 @@ function openProduct(p){
   if ($("#esave")) $("#esave").onclick = () => run(async () => {
     const f = { price:+$("#ep").value||0, cost:$("#ec") ? +$("#ec").value||0 : p.cost, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name };
     if ($("#ev")) f.provId = $("#ev").value || null;
-    if ($("#ebx")) f.porCaja = +$("#ebx").value >= 2 ? Math.round(+$("#ebx").value) : null;
+    if ($("#ebx")){ f.porCaja = cajaVal($("#ebx").value); if (f.porCaja === undefined){ $("#ebx").focus(); return toast(CAJA_MSG); } }
     f.unit = $("#eu").value; f.atajo = $("#eq").checked;
     await act.updateProduct(p, f);
     closeModal(); toast("Producto actualizado"); render(); });
@@ -1431,6 +1439,11 @@ function viewHistorial(){
 
 // ---------- Fiados ----------
 const saldo = c => c.items.reduce((a,i) => a + (i.type === "fiado" ? i.amount : -i.amount), 0);
+// Celular chileno: 9 números (se acepta con +56 delante). Vacío es válido porque es opcional.
+const phoneOk = v => { const d = String(v || "").replace(/\D/g, ""); return !d || d.length === 9 || (d.length === 11 && d.startsWith("56")); };
+const PHONE_MSG = "El celular debe tener 9 números, por ejemplo 9 1234 5678";
+// Mientras se escribe solo deja números, espacios y el + del comienzo
+function phoneInput(el){ if (el) el.oninput = () => { const v = el.value.replace(/[^\d +]/g, "").replace(/(?!^)\+/g, ""); if (v !== el.value) el.value = v; }; }
 function waPhone(p){ let d = String(p||"").replace(/\D/g, ""); if (d.length === 9 && d[0] === "9") d = "56" + d; else if (d.length === 8) d = "569" + d; return d; }
 // En el celular se usa el enlace web (abre la app). En el computador se abre la app de escritorio directo, sin dejar una pestaña abierta.
 const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -1480,20 +1493,25 @@ function openNewClient(){
   openModal(`<div class="stack">
     <div class="spread"><h2>Nuevo cliente</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="field"><label for="cn">Nombre</label><input class="input" id="cn" placeholder="Ej: Ana Ejemplo"></div>
-    <div class="field"><label for="cp">Celular (para recordatorios)</label><input class="input" id="cp" inputmode="tel" placeholder="9 XXXX XXXX"></div>
+    <div class="field"><label for="cp">Celular (para recordatorios)</label><input class="input" id="cp" type="tel" inputmode="tel" autocomplete="off" maxlength="16" placeholder="9 1234 5678"></div>
     <button class="btn primary block" id="csave">Guardar cliente</button></div>`);
+  phoneInput($("#cp"));
   $("#csave").onclick = () => run(async () => { const name = $("#cn").value.trim(); if (!name){ $("#cn").focus(); return; }
+    if (!phoneOk($("#cp").value)){ $("#cp").focus(); return toast(PHONE_MSG); }
     const c = await act.newClient(name, $("#cp").value.trim()); render(); openCliente(c); });
 }
 
 // ---------- Aviso del pan ----------
 function openPan(){
+  // Si el mensaje quedó vacío vuelve el de siempre
+  if (!String(S.panMsg || "").trim()) S.panMsg = PAN_MSG;
   openModal(`<div class="stack">
     <div class="spread"><h2>Avisar que llegó el pan</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="field"><label for="pm">Mensaje</label><textarea class="input" id="pm" rows="3">${esc(S.panMsg)}</textarea></div>
     <a class="btn primary block" id="pango" style="text-align:center;text-decoration:none" href="${esc(waLink("", S.panMsg))}" ${WA_TARGET}>Abrir WhatsApp</a>
     ${waWebNote("panweb", "", S.panMsg)}
     <button class="btn block" id="pancopy">Copiar mensaje</button>
+    <button class="btn ghost block" id="pandef">Volver al mensaje de siempre</button>
     ${isDB() ? `<button class="btn block" id="panlink">Agregar el link para reservar pan</button>` : ""}
     <ol class="small muted" style="margin:0;padding-left:18px">
       <li>Se abre WhatsApp con el mensaje ya escrito.</li>
@@ -1501,7 +1519,8 @@ function openPan(){
     </ol>
     <p class="small muted" style="margin:0">El mensaje queda guardado para la próxima vez.</p>
   </div>`);
-  $("#pm").oninput = e => { act.panMsg(e.target.value); $("#pango").href = waLink("", S.panMsg); const w = $("#panweb"); if (w) w.href = waWeb("", S.panMsg); };
+  $("#pm").oninput = e => { act.panMsg(e.target.value.trim() ? e.target.value : PAN_MSG); $("#pango").href = waLink("", S.panMsg); const w = $("#panweb"); if (w) w.href = waWeb("", S.panMsg); };
+  $("#pandef").onclick = () => { const pm = $("#pm"); pm.value = PAN_MSG; pm.oninput({ target:pm }); toast("Mensaje de siempre"); };
   const pl = $("#panlink"); if (pl) pl.onclick = () => { const pm = $("#pm"); if (!pm.value.includes(reservaLink())){ pm.value = pm.value.trim() + "\nReserva tu pan aquí: " + reservaLink(); pm.oninput({ target:pm }); } };
   $("#pancopy").onclick = () => { const t = $("#pm").value;
     const ok = () => toast("Mensaje copiado");
@@ -1590,13 +1609,22 @@ const can = k => !isDB() || isAdmin() || (k !== "admin" && (db.profile?.permisos
 // Pantallas que necesitan un permiso ("admin" = solo la dueña)
 const VIEW_PERM = { recibir:"recibir", contar:"contar", fiados:"fiados", caja:"caja", proveedores:"proveedores", compras:"proveedores", ofertas:"ofertas",
   costos:"costos", resumen:"resumen", pagina:"admin", extensiones:"admin", tiposdepan:"admin", respaldo:"admin" };
+// Cerrar sesión para que entre otra persona en este aparato
+function logout(){
+  const pend = outbox.list().length;
+  openModal(`<div class="stack"><h2>¿Cerrar sesión?</h2>
+    <p style="margin:0">Sales de la cuenta de ${esc(db.profile.nombre)} y vuelve la pantalla para entrar con usuario y contraseña.</p>
+    ${pend ? `<p class="small" style="margin:0;color:var(--warn);font-weight:600">Hay ${pend} ${pend === 1 ? "venta o fiado guardado" : "ventas o fiados guardados"} en este aparato que todavía no se envían. Se enviarán cuando alguien vuelva a entrar aquí con internet.</p>` : ""}
+    <div class="grid2"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="lgout">Cerrar sesión</button></div></div>`);
+  $("#lgout").onclick = () => run(async () => { await sb.auth.signOut(); try { localStorage.removeItem(COPY_KEY); } catch(e){} location.reload(); });
+}
 function viewEquipo(){
   const me = db.profile, team = Object.values(db.team).sort((a,b) => (b.rol === "admin") - (a.rol === "admin") || a.nombre.localeCompare(b.nombre));
   return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button></header>
   <div class="stack">
     <h2>Equipo y cuenta</h2>
     <div class="card stack">
-      <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${rolName(me)}</div></div><button class="btn sm" id="logout">Salir</button></div>
+      <div class="spread"><div><div class="name" style="font-weight:700">${esc(me.nombre)}</div><div class="small muted">Usuario ${esc(me.usuario)} · ${rolName(me)}</div></div><button class="btn sm" id="logout">Cerrar sesión</button></div>
       <button class="btn block" id="mypass">Cambiar mi contraseña</button>
     </div>
     ${isAdmin() ? `<div class="card"><div class="spread"><h3>Personas de la tienda</h3><button class="btn sm primary" id="addu">+ Agregar</button></div>
@@ -1916,7 +1944,7 @@ function openProv(v){
   openModal(`<div class="stack">
     <div class="spread"><h2>${v ? esc(v.name) : "Nuevo proveedor"}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="field"><label for="vn">Nombre</label><input class="input" id="vn" value="${esc(v?.name || "")}" placeholder="Ej: Distribuidora del barrio"></div>
-    <div class="field"><label for="vp">Celular o teléfono</label><input class="input" id="vp" inputmode="tel" value="${esc(v?.phone || "")}" placeholder="9 XXXX XXXX"></div>
+    <div class="field"><label for="vp">Celular o teléfono</label><input class="input" id="vp" type="tel" inputmode="tel" autocomplete="off" maxlength="16" value="${esc(v?.phone || "")}" placeholder="9 1234 5678"></div>
     <div class="field"><label for="vo">Nota</label><input class="input" id="vo" value="${esc(v?.note || "")}" placeholder="Ej: pasa los martes, pedido mínimo $50.000"></div>
     <button class="btn primary block" id="vsave">Guardar</button>
     ${v && prods.length ? `<button class="btn block" id="vcost">Ver lo que cuesta cada producto</button>` : ""}
@@ -1927,7 +1955,9 @@ function openProv(v){
   if ($("#vpick")) $("#vpick").onclick = () => openProvPick(v);
   document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => run(async () => { await act.setProv([b.dataset.vdel], null); openProv(v); render(); }));
   if ($("#vcost")) $("#vcost").onclick = () => { closeModal(); ui.costProv = v.id; go("costos"); };
+  phoneInput($("#vp"));
   $("#vsave").onclick = () => run(async () => { const name = $("#vn").value.trim(); if (!name) return $("#vn").focus();
+    if (!phoneOk($("#vp").value)){ $("#vp").focus(); return toast(PHONE_MSG); }
     await act.saveProv(v, { name, phone:$("#vp").value.trim(), note:$("#vo").value.trim() }); closeModal(); render(); toast("Proveedor guardado"); });
 }
 
@@ -2093,7 +2123,7 @@ function openCosto(p){
     <div class="grid2">
       <div class="field"><label for="cu">Costo ${kg ? "por kg" : "por unidad"}</label><input class="input" id="cu" type="number" min="0" inputmode="numeric" value="${p.cost}"></div>
       <div class="field"><label for="cv">Precio de venta</label><input class="input" id="cv" type="number" min="0" inputmode="numeric" value="${p.price}"></div>
-      ${kg ? "" : `<div class="field"><label for="cn">Unidades por caja</label><input class="input" id="cn" type="number" min="2" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12"></div>
+      ${kg ? "" : `<div class="field"><label for="cn">Unidades por caja</label><input class="input" id="cn" type="number" min="2" max="1000" step="1" inputmode="numeric" value="${p.porCaja || ""}" placeholder="Ej: 12"></div>
       <div class="field"><label for="cc">Costo de la caja</label><input class="input" id="cc" type="number" min="0" inputmode="numeric" value="${p.porCaja ? p.cost * p.porCaja : ""}" placeholder="Opcional"></div>`}
     </div>
     <div class="formula" id="cres"></div>
@@ -2106,8 +2136,9 @@ function openCosto(p){
     const c = +$("#cu").value || 0, v = +$("#cv").value || 0, m = v - c;
     $("#cres").innerHTML = `Ganas <b>${clp(m)}</b> ${kg ? "por kg" : "por unidad"} (${v ? Math.round(m / v * 100) : 0}% del precio)${n >= 2 && !kg ? ` · <b>${clp(m * n)}</b> por caja vendida completa` : ""}`; };
   ["cu","cv","cn","cc"].forEach(id => { const el = $("#" + id); if (el) el.oninput = () => upd(id); }); upd();
-  $("#csave").onclick = () => run(async () => { const n = +($("#cn")?.value) || 0;
-    await act.updateProduct(p, { cost:Math.max(0, Math.round(+$("#cu").value || 0)), price:Math.max(0, Math.round(+$("#cv").value || 0)), ...(kg ? {} : { porCaja:n >= 2 ? Math.round(n) : null }) });
+  $("#csave").onclick = () => run(async () => { const n = kg ? null : cajaVal($("#cn").value);
+    if (n === undefined){ $("#cn").focus(); return toast(CAJA_MSG); }
+    await act.updateProduct(p, { cost:Math.max(0, Math.round(+$("#cu").value || 0)), price:Math.max(0, Math.round(+$("#cv").value || 0)), ...(kg ? {} : { porCaja:n }) });
     closeModal(); render(); toast("Costo guardado"); });
 }
 
@@ -2300,12 +2331,13 @@ function viewMas(){
       opt("reservas","reservas","Reservas de pan", pend + " pendientes hoy" + (isDB() ? "" : " · vista previa")),
       opt("tiposdepan","pan","Tipos de pan", `${nPan} ${nPan === 1 ? "tipo" : "tipos"} · precio por unidad y botones rápidos`)] : []))}
     ${sec("Configuración", [
-      isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña o salir"}`) : "",
+      isDB() ? opt("equipo","equipo","Equipo y cuenta", `${esc(db.profile.nombre)} · ${isAdmin() ? "agregar personas y permisos" : "cambiar contraseña"}`) : "",
       opt("pagina","pagina","Página de la tienda","Links para clientes: reseñas, grupo de WhatsApp, reservas y QR"),
       opt("respaldo","respaldo","Respaldo","Descargar o restaurar una copia, y respaldo automático por correo"),
       opt("instalar","instalar","Instalar la app", isStandalone() ? "Ya está instalada en este aparato" : "Con su ícono en el celular o computador"),
       opt("extensiones","ajustes","Extensiones","Encender o apagar partes de la app"),
-      opt("apariencia","apariencia","Apariencia","Tema claro u oscuro, fuente y colores")])}
+      opt("apariencia","apariencia","Apariencia","Tema claro u oscuro, fuente y colores"),
+      isDB() ? `<button class="sector" id="logout"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS.equipo}</span>Cerrar sesión</span><span></span><span class="sub">Estás como ${esc(db.profile.nombre)} · para entrar con otra cuenta</span></button>` : ""])}
   </div>`;
 }
 
@@ -2328,8 +2360,8 @@ function basicTour(){
     demo && st(`#res [data-pick="${demo.id}"]`, "Agrégalo a la venta", "Toca el producto y queda en la venta. Si un producto todavía no tiene precio, la app lo pregunta una sola vez y lo guarda.", { tap:true }),
     demo && st(".cartline .stepper", "Cantidad", "Con <b>+</b> y <b>−</b> cambias cuántas unidades lleva. Pruébalo.", { free:true }),
     st("#scan", "Escanear", "Abre la cámara para leer el código de barras. Con la pistola lectora es más fácil: solo dispara y el producto se suma, sin tocar la pantalla."),
-    st(() => $("[data-medio]")?.parentElement, "Medio de pago", "Elige efectivo, débito o transferencia. En efectivo, escribe con cuánto paga y la app calcula el vuelto."),
-    st("#confirm", "Confirmar la venta", "Al terminar se toca <b>Confirmar venta</b> y el stock baja solo. Ahora no la confirmamos: esta venta de prueba se borra al salir del tutorial."),
+    st(() => $("[data-medio]")?.parentElement, "Medio de pago", "Elige efectivo, débito o transferencia. En efectivo, escribe con cuánto paga y la app calcula el vuelto.", { keep:true }),
+    st("#confirm", "Confirmar la venta", "Al terminar se toca <b>Confirmar venta</b> y el stock baja solo. Ahora no la confirmamos: esta venta de prueba se borra al salir del tutorial.", { keep:true }),
     ...(can("contar") ? [
       st('#tabs [data-view="contar"]', "Contar", "Así se carga lo que hay de verdad en la estantería, un sector a la vez. Toca <b>Contar</b>.", { tap:true }),
       st("[data-sector]", "Elige un sector", "Cada sector queda al día desde su propio conteo, así que se puede contar uno por día. Toca este para ver cómo es.", { tap:true }),
@@ -2375,7 +2407,7 @@ const TOURS = {
   fiados: () => [
     st(".card.kpi", "Total por cobrar", "Lo que deben entre todos los clientes."),
     st("#addc", "Agregar cliente", "Se agrega una vez, con su celular si quieres mandarle recordatorios."),
-    st("[data-client]", "Cada cliente", `Toca su nombre para anotar un fiado o un abono${can("whatsapp") ? " y mandarle un recordatorio por WhatsApp" : ""}.`)],
+    st("[data-client]", "Cada cliente", `${S.clients.length ? "Toca su nombre" : "Los clientes que agregues aparecen en esta lista. Toca el nombre de uno"} para anotar un fiado o un abono${can("whatsapp") ? " y mandarle un recordatorio por WhatsApp" : ""}.`, { keep:true })],
   recibir: () => [
     st("#supfield", "Proveedor", "Toca la distribuidora que llegó o escribe una nueva. Las nuevas quedan guardadas."),
     st("#provpicks .card", "Sus productos", "Los productos asociados a ese proveedor aparecen aquí: tócalos y se agregan sin buscar."),
@@ -2447,7 +2479,11 @@ let tour = null;
 function startBasicTour(){ startTour(basicTour(), true); }
 function startTour(steps, basic){
   endTour(false);
-  steps = steps.filter(Boolean); if (!steps.length) return;
+  steps = steps.filter(Boolean);
+  // En el tutorial de una pantalla se quitan antes los pasos de lo que no está a la vista (por ejemplo, la venta vacía),
+  // así la cuenta "3 de 4" no salta números. En el recorrido básico las cosas aparecen a medida que se tocan.
+  if (!basic) steps = steps.filter(s => !s.el || s.keep || s.wait || tourFind(s));
+  if (!steps.length) return;
   const root = document.createElement("div"); root.id = "tour";
   root.innerHTML = `<div class="tour-hole"></div>${"<div class=\"tour-block\"></div>".repeat(5)}<div class="tour-tip" role="dialog" aria-live="polite"></div>`;
   document.body.appendChild(root);
@@ -2495,7 +2531,10 @@ async function tourStep(i, dir){
   if (s.el){
     const wait = s.wait || (t.steps[i - 1]?.tap ? 1500 : 150), t0 = Date.now();
     while (!(el = tourFind(s)) && Date.now() - t0 < wait){ await pause(50); if (tour !== t || t.seq !== seq) return; }
-    if (!el) return tourStep(i + dir, dir);
+    // Si el elemento no está, el paso se salta; los marcados "keep" se explican igual al centro de la pantalla
+    if (!el && !s.keep) return tourStep(i + dir, dir);
+  }
+  if (el){
     // Primero se mueve la página hasta el elemento y después el foco se desliza hacia él
     const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
     tourScrollX(el, smooth);
@@ -2594,6 +2633,7 @@ function render(){
   const pb = $("#panbtn"); if (pb) pb.onclick = openPan;
   tourButton(v);
   const tb = $("#tourbtn"); if (tb) tb.onclick = startBasicTour;
+  const lo = $("#logout"); if (lo) lo.onclick = logout;
   if (v === "inicio" && $("#tourcard")){ $("#tourgo").onclick = startBasicTour; $("#tourno").onclick = () => { tourSeen(true); render(); toast("El tutorial queda en el botón de arriba"); }; }
   if (v === "compras"){
     app.querySelectorAll("[data-smin]").forEach(b => b.onclick = () => openMinimo(P(b.dataset.smin)));
@@ -2677,9 +2717,6 @@ function render(){
     $("#rlim").onchange = e => run(async () => { await act.setting("reservas_hora_limite", +e.target.value); toast("Hora guardada"); });
   }
   if (v === "equipo"){
-    $("#logout").onclick = () => run(async () => {
-      if (outbox.list().length && !confirm("Hay ventas guardadas en este celular que todavía no se envían. Si sales ahora se enviarán cuando alguien vuelva a entrar en este celular. ¿Salir igual?")) return;
-      await sb.auth.signOut(); try { localStorage.removeItem(COPY_KEY); } catch(e){} location.reload(); });
     $("#mypass").onclick = openMyPass;
     if (isAdmin()){
       $("#addu").onclick = openNuevaPersona;
@@ -2706,7 +2743,10 @@ function render(){
     app.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => addToCart(P(b.dataset.quick), true));
     app.querySelectorAll("[data-gedit]").forEach(b => b.onclick = () => { const i = +b.dataset.gedit; openGranel(P(ui.cart[i].pid), i); });
     app.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => { ui.cart[b.dataset.inc].qty++; render(); });
-    app.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const l = ui.cart[b.dataset.dec]; if (--l.qty <= 0) ui.cart.splice(b.dataset.dec,1); render(); });
+    app.querySelectorAll("[data-dec]").forEach(b => b.onclick = () => { const l = ui.cart[b.dataset.dec];
+      // En el tutorial la venta de prueba no se vacía, para que se vean el medio de pago y Confirmar
+      if (l.qty <= 1 && tour?.basic && ui.cart.length === 1) return toast("En el tutorial queda al menos 1");
+      if (--l.qty <= 0) ui.cart.splice(b.dataset.dec,1); render(); });
     app.querySelectorAll("[data-medio]").forEach(b => b.onclick = () => { ui.medio = b.dataset.medio; render(); });
     const paga = $("#paga"); if (paga) paga.oninput = () => { ui.paga = +paga.value || 0; const t = cartLines().reduce((a,l) => a + lineTotal(l), 0);
       $("#vuelto").textContent = ui.paga ? (ui.paga < t ? "Falta " + clp(t - ui.paga) : clp(ui.paga - t)) : "—"; };
@@ -2735,7 +2775,8 @@ function render(){
       if (i.checked){ l.box = true; l.n = n; l.qty = Math.max(1, Math.round(l.qty / n)); l.cost = l.cost * n; }
       else { l.box = false; l.qty = l.qty * n; l.cost = Math.round(l.cost / n); }
       render(); });
-    app.querySelectorAll("[data-rn]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rn]; l.n = Math.max(2, Math.round(+i.value || 2)); renderKeepFocus(); });
+    app.querySelectorAll("[data-rn]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rn]; const n = Math.round(+i.value || 2); l.n = Math.min(1000, Math.max(2, n)); if (n !== l.n) toast(CAJA_MSG); renderKeepFocus(); });
+    const rd = $("#rdiscard"); if (rd) rd.onclick = () => openModal(`<div class="stack"><h2>¿Descartar la recepción?</h2><p style="margin:0">Se borran los productos anotados y el proveedor elegido. No cambia el stock.</p><div class="grid2"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="rdgo">Descartar</button></div></div>`) || ($("#rdgo").onclick = () => { ui.recv = { supplier:"", provId:null, items:[] }; closeModal(); render(); toast("Recepción descartada"); });
     $("#confirm").onclick = () => run(async () => { const n = ui.recv.items.reduce((a,l) => a + (recvUnits(l)||0), 0);
       $("#confirm").disabled = true; $("#confirm").textContent = "Guardando…";
       // Un proveedor nuevo escrito a mano queda guardado en la lista
