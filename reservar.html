@@ -127,7 +127,7 @@ function render(){
         <div class="days"><button class="day" data-para="hoy" aria-pressed="${form.para==="hoy"}" ${lateToday()?"disabled":""}>Hoy</button><button class="day" data-para="manana" aria-pressed="${form.para==="manana"}">Mañana</button></div>
         ${lateToday() ? `<span class="small muted">Las reservas para hoy se reciben hasta las ${info.hora_limite}:00.</span>` : ""}</div>
       <div class="field"><label for="n">Tu nombre</label><input class="input" id="n" autocomplete="name" value="${esc(form.nombre || "")}" placeholder="Ej: Ana Torres"></div>
-      <div class="field"><label for="t">Tu celular (opcional, para avisarte cuando esté listo)</label><input class="input" id="t" type="tel" inputmode="tel" autocomplete="tel" value="${esc(form.telefono || "")}" placeholder="9 1234 5678"></div>
+      <div class="field"><label for="t">Tu celular (opcional, para avisarte cuando esté listo)</label><input class="input" id="t" type="tel" inputmode="tel" autocomplete="tel" maxlength="16" value="${esc(form.telefono || "")}" placeholder="9 1234 5678"></div>
       <div class="field"><label for="o">Nota (opcional)</label><input class="input" id="o" maxlength="200" value="${esc(form.nota || "")}" placeholder="Ej: bien tostadas"></div>
       <div class="error" id="err" hidden></div>
       <button class="btn primary" id="go" ${total ? "" : "disabled"}>Reservar${total ? ` ${total} ${total === 1 ? "pan" : "panes"}` : ""}</button>
@@ -145,11 +145,15 @@ function bind(){
   document.querySelectorAll("[data-cancel]").forEach(x => x.onclick = async () => {
     if (!confirm("¿Cancelar esta reserva?")) return;
     try { const r = await rpc("cancelar_reserva", { p_id:x.dataset.cancel }); mine = mine.map(m => m.id === r.id ? r : m); render(); } catch(e){ alert(msg(e)); } });
+  const t = $("#t"); if (t) t.oninput = () => { const v = t.value.replace(/[^\d +]/g, "").replace(/(?!^)\+/g, ""); if (v !== t.value) t.value = v; };
   const go = $("#go"); if (!go) return;
   go.onclick = async () => {
     keep();
     const err = $("#err"); err.hidden = true;
     if ((form.nombre || "").trim().length < 2){ $("#n").focus(); err.textContent = "Escribe tu nombre"; err.hidden = false; return; }
+    // Celular chileno: 9 números (se acepta con +56 delante)
+    const d = (form.telefono || "").replace(/\D/g, "");
+    if (d && d.length !== 9 && !(d.length === 11 && d.startsWith("56"))){ $("#t").focus(); err.textContent = "El celular debe tener 9 números, por ejemplo 9 1234 5678"; err.hidden = false; return; }
     go.disabled = true; go.textContent = "Reservando…";
     try {
       const items = Object.fromEntries(Object.entries(form.qty).filter(([, n]) => n > 0));
