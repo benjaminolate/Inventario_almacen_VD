@@ -234,6 +234,7 @@ alter table public.productos   add column if not exists unidad text not null def
 alter table public.productos   add column if not exists atajo boolean not null default false;  -- botón rápido en Vender
 alter table public.productos   add column if not exists por_caja integer check (por_caja is null or por_caja between 2 and 1000);  -- unidades que trae la caja del proveedor
 alter table public.productos   add column if not exists proveedor_id uuid references public.proveedores(id) on delete set null;
+alter table public.productos   add column if not exists eliminado boolean not null default false;  -- eliminado: no aparece en ninguna lista, pero sus movimientos se conservan
 alter table public.movimientos add column if not exists descuento integer not null default 0;   -- venta: descuento por ofertas
 alter table public.movimientos add column if not exists medio text check (medio in ('efectivo','debito','transferencia'));  -- venta
 alter table public.movimientos add column if not exists vence date;                              -- compra: fecha de vencimiento
@@ -373,6 +374,7 @@ create table if not exists public.fiados (
   at         timestamptz not null default now()
 );
 create index if not exists fiados_cliente on public.fiados (cliente_id, at);
+alter table public.clientes add column if not exists eliminado boolean not null default false;  -- eliminado: sale de la lista, sus pagos siguen en la caja
 alter table public.fiados add column if not exists medio text check (medio in ('efectivo','debito','transferencia'));  -- abono
 
 -- ---------------------------------------------------------------------
