@@ -384,7 +384,9 @@ function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){
 
 const ui = { view:"inicio", cart:[], medio:"efectivo", shop:{}, recv:{ supplier:"Distribuidora Ejemplo", provId:"v1", items:[] }, sector:null, draft:{}, prodFilter:"Todos", prodQuery:"", histFilter:"todos" };
 
-const P = id => S.products.find(p => p.id === id);
+// Los productos eliminados quedan aparte (S.gone): no aparecen en ninguna lista, pero el historial y los resúmenes siguen mostrando su nombre
+const liveP = id => S.products.find(p => p.id === id);
+const P = id => liveP(id) || (S.gone || []).find(p => p.id === id);
 function stockOf(p){
   if (isDB()) return p.stock == null ? null : r3(p.stock - pendingQty(p.id));
   if (p.countAt == null) return null;
@@ -426,13 +428,13 @@ const db = { profile:null, team:{}, panes:[], ajustes:{}, channel:null, loadedAt
 const iso = t => t ? Date.parse(t) : null;
 const prodFromRow = r => ({ id:r.id, name:r.nombre, cat:r.sector, price:r.precio, cost:r.costo, min:r.minimo, barcode:r.codigo || "",
   has:r.tiene, countQty:r.conteo_cant == null ? null : +r.conteo_cant, countAt:iso(r.conteo_at), estimated:r.aproximado, stock:r.stock == null ? null : +r.stock, pend:+r.ventas_sin_contar || 0, pop:0, provId:r.proveedor_id,
-  unit:r.unidad || "un", atajo:!!r.atajo, porCaja:r.por_caja || null });
+  unit:r.unidad || "un", atajo:!!r.atajo, porCaja:r.por_caja || null, gone:!!r.eliminado });
 const movFromRow = r => ({ id:r.id, pid:r.producto_id, type:r.tipo, qty:+r.cantidad, price:r.precio, cost:r.costo, supplier:r.proveedor, expected:r.esperado == null ? null : +r.esperado, at:iso(r.at), user:r.usuario_id,
   disc:r.descuento || 0, medio:r.medio, vence:r.vence, venceOk:r.vence_revisado });
 const provFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono || "", note:r.nota || "" });
 const ofeFromRow = r => ({ id:r.id, pid:r.producto_id, qty:r.cantidad, price:r.precio, active:r.activa });
 const cieFromRow = r => ({ id:r.id, desde:iso(r.desde), hasta:iso(r.hasta), fondo:r.fondo, esperado:r.esperado, contado:r.contado, ventas:r.ventas, note:r.nota, at:iso(r.at), user:r.usuario_id });
-const cliFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono || "", items:[] });
+const cliFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono || "", items:[], gone:!!r.eliminado });
 const fiaFromRow = r => ({ id:r.id, type:r.tipo, amount:r.monto, note:r.nota, at:iso(r.at), user:r.usuario_id, medio:r.medio });
 const resFromRow = r => ({ id:r.id, name:r.nombre, phone:r.telefono, detail:r.detalle, items:r.items, note:r.nota, codigo:r.codigo, dia:r.dia, estado:r.estado, done:r.estado === "entregada", at:iso(r.creado) });
 const userName = id => db.team[id]?.nombre || "";
@@ -502,8 +504,8 @@ async function dbLoadAll(){
   db.panes = panes; db.team = Object.fromEntries(team.map(t => [t.id, t]));
   db.profile = db.team[db.profile.id] || db.profile;
   // Se reemplaza el contenido manteniendo los mismos objetos de productos, por si hay una ventana abierta
-  const prev = S?.products || [];
-  S = { products: prods.map(r => { const o = prodFromRow(r), cur = prev.find(p => p.id === o.id); return cur ? Object.assign(cur, o) : o; }),
+  const prev = S?.products || [], ps = prods.map(r => { const o = prodFromRow(r), cur = prev.find(p => p.id === o.id); return cur ? Object.assign(cur, o) : o; });
+  S = { products: ps.filter(p => !p.gone), gone: ps.filter(p => p.gone),
     movs: movs.map(movFromRow), clients: cs, reservas: res.map(resFromRow), panMsg: db.ajustes.mensaje_pan || PAN_MSG,
     proveedores: provs.map(provFromRow), ofertas: ofertas.map(ofeFromRow), cierres: cierres.map(cieFromRow), vencs: vencs.map(movFromRow) };
   db.loadedAt = Date.now(); db.offline = false;
@@ -515,7 +517,8 @@ async function loadVencs(){
 async function fetchProducts(ids){
   ids = [...new Set(ids)].filter(Boolean); if (!ids.length) return;
   const rows = await q(sb.from("productos_stock").select("*").in("id", ids));
-  rows.forEach(r => upsert(S.products, prodFromRow(r)));
+  rows.forEach(r => { const o = prodFromRow(r);
+    if (o.gone){ S.products = S.products.filter(p => p.id !== o.id); upsert(S.gone || (S.gone = []), o); } else upsert(S.products, o); });
 }
 // Trae los movimientos nuevos (los propios y los de otros celulares)
 async function syncMovs(){
@@ -548,7 +551,7 @@ function dbSubscribe(){
     refreshSoon(r.producto_id); });
   on("productos", ({ new:r, old:o }) => refreshSoon(r?.id || o?.id));
   on("clientes", ({ eventType, new:r }) => { if (eventType === "DELETE") return reloadSoon();
-    const c = S.clients.find(c => c.id === r.id); if (c) Object.assign(c, { name:r.nombre, phone:r.telefono || "" }); else S.clients.push(cliFromRow(r)); softRender(); });
+    const c = S.clients.find(c => c.id === r.id); if (c) Object.assign(c, { name:r.nombre, phone:r.telefono || "", gone:!!r.eliminado }); else S.clients.push(cliFromRow(r)); softRender(); });
   on("fiados", ({ eventType, new:r }) => { if (eventType !== "INSERT") return reloadSoon();
     const c = S.clients.find(c => c.id === r.cliente_id); if (!c) return reloadSoon();
     if (!c.items.some(i => i.id === r.id)) c.items.push(fiaFromRow(r)); softRender(); });
@@ -702,6 +705,19 @@ const act = {
     if (qty !== "") await q(sb.rpc("registrar_conteo", { items:[{ producto_id:row.id, cantidad:Math.max(0, r3(parseFloat(qty)||0)) }] }));
     await Promise.all([syncMovs(), fetchProducts([row.id])]);
     return P(row.id);
+  },
+  // Eliminar un producto: deja de aparecer en todas partes, pero sus ventas y movimientos se conservan.
+  // El código de barras queda libre para otro producto.
+  async deleteProduct(p){
+    if (panReservable(p) && (!isDB() || isAdmin())) await act.panReserva(p, false);
+    if (!isDB()){ Object.assign(p, { gone:true, has:false, atajo:false, barcode:"" }); S.products = S.products.filter(x => x !== p); (S.gone || (S.gone = [])).push(p); save(); }
+    else { await q(sb.from("productos").update({ eliminado:true, tiene:false, atajo:false, codigo:null, actualizado:new Date().toISOString() }).eq("id", p.id)); await fetchProducts([p.id]); }
+    ui.cart = ui.cart.filter(l => l.pid !== p.id); ui.recv.items = ui.recv.items.filter(l => l.pid !== p.id); delete ui.draft[p.id];
+  },
+  // Eliminar un cliente (solo si está al día): sale de la lista, pero sus pagos siguen contando en el cierre de caja
+  async deleteClient(c){
+    if (!isDB()){ c.gone = true; save(); return; }
+    await q(sb.from("clientes").update({ eliminado:true }).eq("id", c.id)); c.gone = true;
   },
   async newClient(name, phone){
     if (!isDB()){ const c = { id:"c"+uid(), name, phone, items:[] }; S.clients.push(c); save(); return c; }
@@ -1306,7 +1322,7 @@ function viewContar(){
       <span class="small muted">${countAsk() ? "Escanea una vez y escribe cuántos hay, o cuántas cajas y de cuántas unidades." : "Para una caja completa, toca Cajas × en el producto y escribe la multiplicación."}</span></div>
     <div class="card" style="padding-block:4px">
       ${ps.map(p => { const d = ui.draft[p.id] || {}; const off = d.none ?? !p.has; const prev = stockOf(p);
-        return `<div class="countrow ${off?"off":""}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">${off ? "No lo tenemos" : prev==null ? "Sin contar" : `Sistema dice: ${fq(prev, p)}${p.estimated?" (aprox.)":""}`}</div></div>
+        return `<div class="countrow ${off?"off":""}"><div style="min-width:0"><button class="linkbtn" style="text-align:left;color:inherit;text-decoration-color:var(--line)" data-copen="${p.id}" aria-label="Ver o cambiar ${esc(p.name)}">${esc(p.name)}</button><div class="small muted">${off ? "No lo tenemos" : prev==null ? "Sin contar" : `Sistema dice: ${fq(prev, p)}${p.estimated?" (aprox.)":""}`}</div></div>
           <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal" placeholder="kg"' : 'inputmode="numeric" placeholder="—"'} value="${d.qty ?? ""}" data-cq="${p.id}" ${off?"disabled":""} aria-label="Cantidad de ${esc(p.name)}">
           <div class="opts"><label><input type="checkbox" data-ce="${p.id}" ${d.est?"checked":""} ${off?"disabled":""}> Es aproximado</label>
           ${off ? "" : `<button class="btn sm" data-cmul="${p.id}">Cajas ×</button>`}<button class="btn sm ghost" data-cn="${p.id}">${off ? "Sí lo tenemos" : "No lo tenemos"}</button></div></div>`; }).join("")}
@@ -1381,7 +1397,7 @@ function openProduct(p){
     <div class="field"><label for="eu">Se vende</label><select class="input" id="eu"><option value="un" ${!isKg(p) ? "selected" : ""}>Por unidad</option><option value="kg" ${isKg(p) ? "selected" : ""}>A granel, por kilo (precio por kg)</option></select></div>
     <label class="row"><input type="checkbox" id="eq" ${p.atajo ? "checked" : ""}> Botón rápido en Vender</label>
     ${activeOffers(p.id).length ? `<p class="small" style="margin:0;color:var(--ok);font-weight:600">En oferta: ${esc(activeOffers(p.id).map(offerTxt).join(" o "))}</p>` : ""}
-    ${can("productos") ? `<button class="btn primary block" id="esave">Guardar cambios</button>` : `<p class="small muted" style="margin:0">Solo la dueña o quien tenga permiso puede cambiar los datos del producto.</p>`}
+    ${can("productos") ? `<button class="btn primary block" id="esave">Guardar cambios</button><button class="btn ghost block" id="edel">Eliminar producto</button>` : `<p class="small muted" style="margin:0">Solo la dueña o quien tenga permiso puede cambiar los datos del producto.</p>`}
     <div><h3>Últimos movimientos</h3><div class="list" id="phist">${hist.map(movRow).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
   if (!can("productos")) document.querySelectorAll(".sheet input, .sheet select").forEach(i => i.disabled = true);
@@ -1392,6 +1408,11 @@ function openProduct(p){
     f.unit = $("#eu").value; f.atajo = $("#eq").checked;
     await act.updateProduct(p, f);
     closeModal(); toast("Producto actualizado"); render(); });
+  if ($("#edel")) $("#edel").onclick = () => openModal(`<div class="stack"><h2>¿Eliminar ${esc(p.name)}?</h2>
+    <p style="margin:0">Se quita del catálogo, de Vender, de Contar y de todas las listas. Lo que ya se vendió o se recibió se mantiene en el historial y en los resúmenes.</p>
+    <p class="small muted" style="margin:0">Si la tienda solo dejó de venderlo por un tiempo, es mejor marcar <b>No lo tenemos</b> en Contar. Si lo eliminas por error, agrégalo de nuevo.</p>
+    <div class="grid2"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="edgo">Eliminar</button></div></div>`) || ($("#edgo").onclick = () => run(async () => {
+      await act.deleteProduct(p); closeModal(); render(); toast(`${p.name} eliminado`); }));
   // En modo tienda el historial completo del producto se pide al servidor
   if (isDB()) q(sb.from("movimientos").select("*").eq("producto_id", p.id).order("at", { ascending:false }).limit(12))
     .then(rows => { const el = $("#phist"); if (el) el.innerHTML = rows.map(r => movRow(movFromRow(r))).join("") || `<div class="empty">Sin movimientos.</div>`; }, () => {});
@@ -1453,7 +1474,7 @@ function waWeb(phone, text){ return "https://web.whatsapp.com/send?" + waQuery(p
 const WA_TARGET = IS_MOBILE ? 'target="_blank" rel="noopener"' : "";
 const waWebNote = (id, phone, text) => IS_MOBILE ? "" : `<p class="small muted" style="margin:0">¿No tienes WhatsApp instalado en este computador? <a id="${id}" href="${esc(waWeb(phone, text))}" target="whatsapp-web" rel="noopener" style="color:var(--brand)">Usar WhatsApp Web</a></p>`;
 function viewFiados(){
-  const cs = S.clients.slice().sort((a,b) => saldo(b) - saldo(a));
+  const cs = S.clients.filter(c => !c.gone).sort((a,b) => saldo(b) - saldo(a));
   const total = cs.reduce((a,c) => a + Math.max(0, saldo(c)), 0);
   return `${header("Fiados", "Cuaderno de cuentas de clientes")}
   <div class="stack">
@@ -1480,12 +1501,18 @@ function openCliente(c){
     </div>
     ${ext("caja") ? `<div class="field"><label for="fmed">Si es un pago, ¿cómo pagó?</label><select class="input" id="fmed">${MEDIOS.map(([k,n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>` : ""}
     <div class="grid2"><button class="btn primary" id="addFiado">Anotar fiado</button><button class="btn" id="addAbono">Registrar pago</button></div>
+    ${!can("fiados") ? "" : s <= 0 ? `<button class="btn ghost block" id="cdel">Eliminar cliente</button>` : `<p class="small muted" style="margin:0">Para eliminar a este cliente, primero tiene que quedar al día.</p>`}
     <div><h3>Movimientos</h3><div class="list">${items.map(i => `<div class="item"><div class="main"><div class="name">${i.type === "fiado" ? esc(i.note || "Fiado") : "Pago"}</div><div class="sub">${i.pending ? `<span class="pill warn">Por enviar</span> ` : ""}${ago(i.at)}${i.type === "abono" && i.medio && ext("caja") ? " · " + medioName(i.medio) : ""}</div></div>
       <span class="diff" style="color:${i.type === "fiado" ? "var(--bad)" : "var(--ok)"}">${i.type === "fiado" ? "+" : "−"}${clp(i.amount)}</span></div>`).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
   const add = type => run(async () => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
     const r = await act.clientMov(c, type, a, $("#fn").value.trim(), $("#fmed")?.value);
     toast((type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`) + (r === "pendiente" ? ". Se enviará cuando vuelva internet." : "")); render(); openCliente(c); });
+  const cd = $("#cdel"); if (cd) cd.onclick = () => openModal(`<div class="stack"><h2>¿Eliminar a ${esc(c.name)}?</h2>
+    <p style="margin:0">Sale de la lista de fiados. Los pagos que ya hizo siguen contando en el cierre de caja y en los respaldos.</p>
+    <div class="grid2"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="cdgo">Eliminar</button></div></div>`) || ($("#cdgo").onclick = () => run(async () => {
+      if (c.items.some(i => i.pending)) return toast("Este cliente tiene movimientos por enviar. Espera a que vuelva internet.");
+      await act.deleteClient(c); closeModal(); render(); toast(`${c.name} eliminado`); }));
   $("#addFiado").onclick = () => add("fiado");
   $("#addAbono").onclick = () => add("abono");
 }
@@ -2159,7 +2186,7 @@ function viewVencimientos(){
 
 // ---------- Ofertas y packs ----------
 function viewOfertas(){
-  const os = (S.ofertas || []).filter(o => P(o.pid)).slice().sort((a,b) => b.active - a.active || P(a.pid).name.localeCompare(P(b.pid).name));
+  const os = (S.ofertas || []).filter(o => liveP(o.pid)).slice().sort((a,b) => b.active - a.active || P(a.pid).name.localeCompare(P(b.pid).name));
   return `${backMasHtml()}
   <div class="stack">
     <div class="spread"><h2>Ofertas y packs</h2><button class="btn primary sm" id="addo">+ Nueva</button></div>
@@ -2309,7 +2336,7 @@ function openPanTipo(p){
 function viewMas(){
   const pend = isDB() ? S.reservas.filter(r => r.dia === hoyChile() && r.estado === "pendiente").length : S.reservas.filter(r => !r.done).length;
   const opt = (go, icon, title, sub) => VIEW_PERM[go] && !can(VIEW_PERM[go]) ? "" : `<button class="sector" data-go="${go}"><span class="name" style="display:flex;gap:10px;align-items:center"><span style="width:22px;height:22px;display:inline-flex" class="mi">${ICONS[icon]}</span>${title}</span><span></span><span class="sub">${sub}</span></button>`;
-  const low = lowStock().length, venc = vencList().filter(m => diasPara(m.vence) <= 7).length, nOfe = (S.ofertas || []).filter(o => o.active).length;
+  const low = lowStock().length, venc = vencList().filter(m => diasPara(m.vence) <= 7).length, nOfe = (S.ofertas || []).filter(o => o.active && liveP(o.pid)).length;
   const sec = (title, items) => items.join("") ? `<h3 style="margin-top:8px">${title}</h3>${items.join("")}` : "";
   const nPan = panes().length;
   return `${header("Más", "Otras herramientas")}
@@ -2391,6 +2418,7 @@ const TOURS = {
     st("#confirm", "Confirmar", "Registra la venta y descuenta el stock. Sin internet queda guardada en el celular y se envía sola después.")],
   contar: () => ui.sector ? [
     st(".countrow:not(.off)", "Escribe lo que hay", "Anota las unidades que hay en la estantería. Marca Es aproximado si no estás segura."),
+    st("[data-copen]", "Cada producto", "Toca el nombre para cambiar si se vende por unidad o por kilo, el precio o el código, o para eliminarlo."),
     st("[data-cmul]", "Cajas ×", "Para una caja completa: escribe cuántas cajas y de cuántas unidades, y la app multiplica."),
     st("#cmodes", "Al escanear", "Elige si cada escaneo suma 1, o si después de escanear se pregunta la cantidad (ideal para cajas)."),
     st("[data-cn]", "No lo tenemos", "Si la tienda no vende ese producto, tócalo y desaparece de las listas."),
@@ -2407,7 +2435,7 @@ const TOURS = {
   fiados: () => [
     st(".card.kpi", "Total por cobrar", "Lo que deben entre todos los clientes."),
     st("#addc", "Agregar cliente", "Se agrega una vez, con su celular si quieres mandarle recordatorios."),
-    st("[data-client]", "Cada cliente", `${S.clients.length ? "Toca su nombre" : "Los clientes que agregues aparecen en esta lista. Toca el nombre de uno"} para anotar un fiado o un abono${can("whatsapp") ? " y mandarle un recordatorio por WhatsApp" : ""}.`, { keep:true })],
+    st("[data-client]", "Cada cliente", `${S.clients.some(c => !c.gone) ? "Toca su nombre" : "Los clientes que agregues aparecen en esta lista. Toca el nombre de uno"} para anotar un fiado o un abono${can("whatsapp") ? " y mandarle un recordatorio por WhatsApp" : ""}.`, { keep:true })],
   recibir: () => [
     st("#supfield", "Proveedor", "Toca la distribuidora que llegó o escribe una nueva. Las nuevas quedan guardadas."),
     st("#provpicks .card", "Sus productos", "Los productos asociados a ese proveedor aparecen aquí: tócalos y se agregan sin buscar."),
@@ -2785,6 +2813,7 @@ function render(){
       ui.recv.items = []; render(); toast(`Recepción guardada: ${n} unidades`); });
   }
   if (v === "contar"){
+    app.querySelectorAll("[data-copen]").forEach(b => b.onclick = () => openProduct(P(b.dataset.copen)));
     app.querySelectorAll("[data-sector]").forEach(b => b.onclick = () => { ui.sector = b.dataset.sector; ui.draft = {}; render(); window.scrollTo(0,0); });
     if (ui.sector){
       $("#back").onclick = () => { ui.sector = null; render(); };
