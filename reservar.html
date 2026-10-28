@@ -151,6 +151,9 @@ function bind(){
     keep();
     const err = $("#err"); err.hidden = true;
     if ((form.nombre || "").trim().length < 2){ $("#n").focus(); err.textContent = "Escribe tu nombre"; err.hidden = false; return; }
+    // Aviso rápido con las reservas guardadas en este celular (la base de datos igual revisa el límite)
+    const dia = form.para === "hoy" ? info.hoy : new Date(Date.parse(info.hoy + "T12:00:00Z") + 864e5).toISOString().slice(0, 10), lim = info.por_persona || 2;
+    if (mine.filter(r => r.dia === dia && r.estado !== "cancelada").length >= lim){ err.textContent = `Ya tienes ${lim === 1 ? "una reserva" : lim + " reservas"} para ${form.para === "hoy" ? "hoy" : "mañana"}. Si necesitas más pan, habla directo con el almacén.`; err.hidden = false; return; }
     // Celular chileno: 9 números (se acepta con +56 delante)
     const d = (form.telefono || "").replace(/\D/g, "");
     if (d && d.length !== 9 && !(d.length === 11 && d.startsWith("56"))){ $("#t").focus(); err.textContent = "El celular debe tener 9 números, por ejemplo 9 1234 5678"; err.hidden = false; return; }
