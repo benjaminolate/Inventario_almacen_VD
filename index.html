@@ -403,7 +403,7 @@ const lineMoney = (qty, price) => Math.round(qty * price);
 function pendingSales(p){ if (isDB()) return p.pend || 0; return S.movs.filter(m => m.pid === p.id && m.type === "venta").reduce((a,m)=>a+m.qty,0); }
 function ago(t){
   const diff = Date.now() - t, d0 = new Date(); d0.setHours(0,0,0,0);
-  const hm = new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});
+  const hm = new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
   if (t >= d0.getTime()) return "hoy " + hm;
   if (t >= d0.getTime() - D) return "ayer " + hm;
   const days = Math.ceil((d0.getTime() - t)/D);
@@ -1141,9 +1141,15 @@ function lev(a, b){
     prev = cur; }
   return prev[b.length];
 }
-// Puntaje: 100+ = contiene lo escrito tal cual · 50+ = están todas las palabras (en cualquier orden o con un error) · <50 = parecido
+// Cómo suena en español de Chile: qu/k/c fuerte, c suave/z/s, v/b, ll/y, h muda
+const fon = s => s.replace(/qu/g, "k").replace(/c(?=[aou ]|$)/g, "k").replace(/c(?=[ei])/g, "s").replace(/z/g, "s").replace(/v/g, "b").replace(/ll/g, "y").replace(/(^|[^c])h/g, "$1");
+// Puntaje: 100+ = contiene lo escrito tal cual · 50+ = están todas las palabras (en cualquier orden, con un error o escritas como suenan) · <50 = parecido
 function matchScore(name, q){
   const n = norm(name), nq = norm(q); if (!nq) return 1;
+  const s = scoreNorm(n, nq);
+  return s >= 50 ? s : Math.max(s, Math.min(90, scoreNorm(fon(n), fon(nq))));
+}
+function scoreNorm(n, nq){
   if (n.includes(nq)) return 101 + (n.startsWith(nq) ? 20 : 0) - n.length / 1000;
   if (n.replace(/ /g, "").includes(nq.replace(/ /g, ""))) return 95 - n.length / 1000;
   const ws = n.split(" "), ts = nq.split(" ");
@@ -1183,7 +1189,8 @@ function viewVender(){
         const hint = offerHint(l.pid, l.qty), os = activeOffers(l.pid);
         return `<div class="cartline"><div style="min-width:0"><div class="name" style="font-weight:600">${esc(p.name)}</div><div class="small muted">${clp(p.price)} c/u${os.length && !l.disc ? ` · oferta ${esc(os.map(offerTxt).join(" o "))}` : ""}</div>
           ${l.disc ? `<div class="small" style="color:var(--ok);font-weight:600">Oferta ${esc(l.applied.map(([o,n]) => (n > 1 ? n + " × " : "") + offerTxt(o)).join(" + "))}: −${clp(l.disc)}</div>` : ""}
-          ${hint ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(hint)}</div>` : ""}</div>
+          ${hint ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(hint)}</div>` : ""}
+          ${(st => st != null && l.qty > st ? `<div class="small" style="color:var(--warn);font-weight:600">Según el sistema ${st > 0 ? `quedan ${fq(st, p)}` : "no quedan"}. Revisa la cantidad.</div>` : "")(stockOf(p))}</div>
         <div class="stepper"><button data-dec="${i}" aria-label="Quitar uno">−</button><span>${l.qty}</span><button data-inc="${i}" aria-label="Agregar uno">+</button></div><div style="font-weight:700;min-width:6ch;text-align:right">${clp(lineTotal(l))}</div></div>`; }).join("")
         : `<div class="empty">Busca o escanea un producto para agregarlo.</div>`}
       ${disc ? `<div class="spread small" style="padding-top:10px;color:var(--ok);font-weight:600"><span>Descuento por ofertas</span><span>−${clp(disc)}</span></div>` : ""}
@@ -1265,7 +1272,7 @@ function viewRecibir(){
     <div id="provpicks">${provPicks()}</div>
     <div class="card" id="recvlist">
       <h3>Productos recibidos</h3>
-      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid), c = showC(l); return `<div class="countrow" style="grid-template-columns:${c ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div>
+      ${ui.recv.items.length ? ui.recv.items.map((l,i) => { const p = P(l.pid), c = showC(l); return `<div class="countrow" style="grid-template-columns:${c ? "1fr 80px 96px" : "1fr 80px"}"><div style="min-width:0"><div style="font-weight:600">${esc(p.name)}</div><div class="small muted">Stock actual: ${stockOf(p) == null ? "sin contar (aparece cuando se cuente su sector)" : fq(stockOf(p), p)}${isKg(p) ? " · cantidad en kg, costo por kg" : ""}</div>
           ${p.cost || l.cost ? "" : `<div class="small" style="color:var(--warn);font-weight:600">Sin costo: escríbelo ${l.box ? "por caja" : isKg(p) ? "por kilo" : "por unidad, o marca Por caja"}</div>`}</div>
         <input class="input" type="number" min="0" ${isKg(p) ? 'step="0.001" inputmode="decimal"' : 'inputmode="numeric"'} value="${l.qty}" data-rq="${i}" aria-label="${l.box ? "Cajas" : "Cantidad"}">
         ${c ? `<input class="input" type="number" min="0" inputmode="numeric" value="${l.cost || ""}" placeholder="${l.box ? "Caja $" : isKg(p) ? "$ kg" : "$ c/u"}" data-rc="${i}" aria-label="${l.box ? "Costo de la caja" : "Costo unitario"}">` : ""}
@@ -1363,7 +1370,7 @@ function finishCount(){ run(async () => {
   ui.draft = {};
   const sector = ui.sector;
   openModal(`<div class="stack"><h2>Conteo guardado</h2>
-    <p style="margin:0">${n} productos de ${esc(sector)} quedaron al día desde ahora (${new Date(now).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}). Las ventas que hagan desde este momento se descuentan solas.</p>
+    <p style="margin:0">${n} productos de ${esc(sector)} quedaron al día desde ahora (${new Date(now).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hourCycle:"h23"})}). Las ventas que hagan desde este momento se descuentan solas.</p>
     ${diffs.length ? `<div class="card"><h3>Diferencias con lo que esperaba el sistema</h3><div class="list">${diffs.map(([p,e,q]) => `<div class="item"><div class="main"><div class="name">${esc(p.name)}</div><div class="sub">Esperaba ${fq(e,p)}, contaste ${fq(q,p)}</div></div><span class="pill ${q<e?"bad":"ok"}">${q<e?`Faltan ${fq(e-q,p)}`:`Sobran ${fq(q-e,p)}`}</span></div>`).join("")}</div>
       <p class="small muted" style="margin:8px 0 0">Las faltas quedan registradas como merma (vencidos, robo o ventas sin registrar).</p></div>` : ""}
     <button class="btn primary block" data-close>Listo</button></div>`);
@@ -1403,6 +1410,8 @@ function openProduct(p){
   if (!can("productos")) document.querySelectorAll(".sheet input, .sheet select").forEach(i => i.disabled = true);
   if ($("#esave")) $("#esave").onclick = () => run(async () => {
     const f = { price:+$("#ep").value||0, cost:$("#ec") ? +$("#ec").value||0 : p.cost, min:+$("#em").value||0, barcode:$("#eb").value.trim(), name:$("#en").value.trim() || p.name };
+    if (f.price < 0 || f.cost < 0 || f.min < 0) return toast("El precio, el costo y el stock mínimo no pueden ser negativos");
+    const dup = codeTaken(f.barcode, p.id); if (dup){ $("#eb").focus(); return toast(`Ese código de barras ya está en ${dup.name}`); }
     if ($("#ev")) f.provId = $("#ev").value || null;
     if ($("#ebx")){ f.porCaja = cajaVal($("#ebx").value); if (f.porCaja === undefined){ $("#ebx").focus(); return toast(CAJA_MSG); } }
     f.unit = $("#eu").value; f.atajo = $("#eq").checked;
@@ -1417,23 +1426,30 @@ function openProduct(p){
   if (isDB()) q(sb.from("movimientos").select("*").eq("producto_id", p.id).order("at", { ascending:false }).limit(12))
     .then(rows => { const el = $("#phist"); if (el) el.innerHTML = rows.map(r => movRow(movFromRow(r))).join("") || `<div class="empty">Sin movimientos.</div>`; }, () => {});
 }
+// Producto que ya usa ese código de barras (vacío = ninguno)
+const codeTaken = (code, exceptId) => code ? S.products.find(p => p.barcode === code && p.id !== exceptId) : null;
 function openProductForm(sector, code, cb){
   openModal(`<div class="stack">
     <div class="spread"><h2>Agregar producto</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="field"><label for="nn">Nombre</label><input class="input" id="nn" placeholder="Ej: Bebida Bilz 2 L"></div>
     <div class="grid2">
       <div class="field"><label for="ns">Sector</label><select class="input" id="ns">${SECTORS.map(c => `<option ${c===(sector||ui.sector)?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
-      <div class="field"><label for="np">Precio venta</label><input class="input" id="np" type="number" inputmode="numeric" placeholder="0"></div>
+      <div class="field"><label for="np">Precio venta</label><input class="input" id="np" type="number" min="0" inputmode="numeric" placeholder="0"></div>
       <div class="field"><label for="nb">Código de barras</label><input class="input code" id="nb" value="${esc(code||"")}" placeholder="Opcional"></div>
       <div class="field"><label for="nq">Cantidad ahora</label><input class="input" id="nq" type="number" step="any" inputmode="decimal" placeholder="Opcional"></div>
-      <div class="field"><label for="nu">Se vende</label><select class="input" id="nu"><option value="un">Por unidad</option><option value="kg" ${["Pan","Verduras"].includes(sector||ui.sector) ? "selected" : ""}>A granel, por kilo</option></select></div>
+      <div class="field"><label for="nu">Se vende</label><select class="input" id="nu"><option value="un">Por unidad</option><option value="kg" ${(sector||ui.sector) === "Verduras" ? "selected" : ""}>A granel, por kilo</option></select></div>
       <label class="row" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="na"> Botón rápido en Vender</label>
     </div>
     <p class="small muted" style="margin:0">Si escribes la cantidad, el producto queda contado desde este momento. A granel: precio y cantidad por kilo.</p>
     <button class="btn primary block" id="nsave">Guardar producto</button>
   </div>`);
+  let unitTouched = false; $("#nu").onchange = () => unitTouched = true;
+  $("#ns").onchange = () => { if (!unitTouched) $("#nu").value = $("#ns").value === "Verduras" ? "kg" : "un"; };
   $("#nsave").onclick = () => run(async () => {
     const name = $("#nn").value.trim(); if (!name){ $("#nn").focus(); return; }
+    if (+$("#np").value < 0){ $("#np").focus(); return toast("El precio no puede ser negativo"); }
+    if (+$("#nq").value < 0){ $("#nq").focus(); return toast("La cantidad no puede ser negativa"); }
+    const dup = codeTaken($("#nb").value.trim()); if (dup){ $("#nb").focus(); return toast(`Ese código de barras ya está en ${dup.name}`); }
     const p = await act.newProduct({ name, cat:$("#ns").value, price:+$("#np").value || 0, barcode:$("#nb").value.trim(), unit:$("#nu").value, atajo:$("#na").checked }, $("#nq").value);
     closeModal(); toast(`${name} agregado`);
     if (cb) cb(p); else render();
@@ -1506,6 +1522,9 @@ function openCliente(c){
       <span class="diff" style="color:${i.type === "fiado" ? "var(--bad)" : "var(--ok)"}">${i.type === "fiado" ? "+" : "−"}${clp(i.amount)}</span></div>`).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
   const add = type => run(async () => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
+    const debe = saldo(c);
+    if (type === "abono" && debe <= 0){ $("#fm").focus(); return toast(`${c.name.split(" ")[0]} no debe nada`); }
+    if (type === "abono" && a > debe){ $("#fm").value = debe; $("#fm").focus(); return toast(`Debe ${clp(debe)}: el pago no puede ser mayor. Si pagó con más, dale el vuelto.`); }
     const r = await act.clientMov(c, type, a, $("#fn").value.trim(), $("#fmed")?.value);
     toast((type === "fiado" ? `Fiado anotado: ${clp(a)}` : `Pago registrado: ${clp(a)}`) + (r === "pendiente" ? ". Se enviará cuando vuelva internet." : "")); render(); openCliente(c); });
   const cd = $("#cdel"); if (cd) cd.onclick = () => openModal(`<div class="stack"><h2>¿Eliminar a ${esc(c.name)}?</h2>
@@ -2203,7 +2222,7 @@ function openOferta(o, pid){
     <div class="spread"><h2>${o ? "Editar oferta" : "Nueva oferta"}</h2><button class="btn ghost sm" data-close>Cerrar</button></div>
     <div class="field"><label for="ofp">Producto</label><select class="input" id="ofp">${opts.map(p => `<option value="${p.id}" ${p.id === pid ? "selected" : ""}>${esc(p.name)} · ${clp(p.price)}</option>`).join("")}</select></div>
     <div class="grid2">
-      <div class="field"><label for="ofq">Cantidad del pack</label><input class="input" id="ofq" type="number" min="2" inputmode="numeric" value="${o?.qty || 3}"></div>
+      <div class="field"><label for="ofq">Cantidad del pack</label><input class="input" id="ofq" type="number" min="2" max="100" inputmode="numeric" value="${o?.qty || 3}"></div>
       <div class="field"><label for="ofv">Precio del pack</label><input class="input" id="ofv" type="number" min="1" inputmode="numeric" value="${o?.price || ""}" placeholder="Ej: 1500"></div>
     </div>
     <div class="formula" id="ofprev"></div>
@@ -2215,7 +2234,10 @@ function openOferta(o, pid){
     $("#ofprev").textContent = n >= 2 && v > 0 ? (v < normal ? `${n} × ${p.name}: ${clp(v)} en vez de ${clp(normal)} (ahorra ${clp(normal - v)})` : `Ojo: ${clp(v)} no es más barato que ${clp(normal)}`) : `Precio normal de ${n || "…"}: ${clp(normal)}`; };
   ["#ofp","#ofq","#ofv"].forEach(id => $(id).oninput = prev); prev();
   $("#osave").onclick = () => run(async () => { const qty = Math.round(+$("#ofq").value || 0), price = Math.round(+$("#ofv").value || 0);
-    if (qty < 2) return toast("El pack debe tener al menos 2 unidades"); if (price <= 0) return $("#ofv").focus();
+    if (qty < 2) return toast("El pack debe tener al menos 2 unidades"); if (qty > 100) return toast("El pack puede tener hasta 100 unidades");
+    if (price <= 0) return $("#ofv").focus();
+    const normal = qty * (P($("#ofp").value)?.price || 0);
+    if (normal && price >= normal){ $("#ofv").focus(); return toast(`El pack tiene que costar menos de ${clp(normal)}, que es lo que valen ${qty} por separado`); }
     await act.saveOferta(o, { pid:$("#ofp").value, qty, price, active: o ? $("#ofa").checked : true }); closeModal(); render(); toast("Oferta guardada"); });
   const del = $("#odel"); if (del) del.onclick = () => run(async () => { await act.delOferta(o); closeModal(); render(); toast("Oferta eliminada"); });
 }
@@ -2237,7 +2259,7 @@ async function loadCaja(){
   const c = ui.caja || (ui.caja = { fondo: (S.cierres || [])[0]?.fondo ?? 0, contado:{}, note:"" });
   const esp = k => (r.ventas[k] || 0) + (r.abonos[k] || 0) + (k === "efectivo" ? +c.fondo || 0 : 0);
   $("#cajabox").innerHTML = `<div class="card stack">
-    <div class="spread"><h3>Desde ${ago(r.desde)}</h3><span class="small muted">${r.num} ventas</span></div>
+    <div class="spread"><h3>${(d => !d.getHours() && !d.getMinutes() && r.desde >= Date.now() - D ? "Desde las 00:00 de hoy" : "Desde el último cierre, " + ago(r.desde))(new Date(r.desde))}</h3><span class="small muted">${r.num} ventas</span></div>
     <div class="field"><label for="cfondo">Efectivo con que se abrió la caja (sencillo)</label><input class="input" id="cfondo" type="number" min="0" inputmode="numeric" value="${c.fondo}"></div>
     ${MEDIOS.map(([k,n]) => `<div class="countrow" style="grid-template-columns:1fr 110px"><div style="min-width:0"><div style="font-weight:600">${n}</div>
         <div class="small muted">App: <b id="ce_${k}">${clp(esp(k))}</b>${r.abonos[k] ? ` · incluye ${clp(r.abonos[k])} de pagos de fiados` : ""}${k === "efectivo" ? " · incluye el sencillo" : ""}</div><div class="diff" id="cd_${k}"></div></div>
@@ -2810,7 +2832,9 @@ function render(){
       // Un proveedor nuevo escrito a mano queda guardado en la lista
       if (ext("proveedores") && !ui.recv.provId && ui.recv.supplier.trim()) ui.recv.provId = (await act.saveProv(null, { name:ui.recv.supplier.trim(), phone:"", note:"" })).id;
       await act.receive(ui.recv.supplier, ui.recv.items, ui.recv.provId).finally(render);
-      ui.recv.items = []; render(); toast(`Recepción guardada: ${n} unidades`); });
+      const sinContar = ui.recv.items.map(l => P(l.pid)).filter(p => p && stockOf(p) == null);
+      ui.recv.items = []; render();
+      toast(`Recepción guardada: ${n} unidades` + (sinContar.length ? `. ${sinContar.length === 1 ? sinContar[0].name + " todavía no se cuenta" : sinContar.length + " productos todavía no se cuentan"}: su stock aparece al contar su sector en Contar.` : "")); });
   }
   if (v === "contar"){
     app.querySelectorAll("[data-copen]").forEach(b => b.onclick = () => openProduct(P(b.dataset.copen)));
