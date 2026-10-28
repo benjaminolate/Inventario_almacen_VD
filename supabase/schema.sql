@@ -468,6 +468,7 @@ language sql stable security definer set search_path = public as $$
     'tienda',      coalesce((select valor #>> '{}' from ajustes a where a.clave = 'tienda_nombre'), 'Almacén'),
     'abiertas',    coalesce((select (valor #>> '{}')::boolean from ajustes where clave = 'reservas_abiertas'), true),
     'hora_limite', coalesce((select (valor #>> '{}')::int from ajustes where clave = 'reservas_hora_limite'), 19),
+    'por_persona', coalesce((select (valor #>> '{}')::int from ajustes where clave = 'reservas_por_persona'), 2),
     'hora_chile',  extract(hour from now() at time zone 'America/Santiago')::int,
     'hoy',         hoy_chile(),
     'panes',       coalesce((select jsonb_agg(nombre order by orden, id) from panes where activo), '[]'::jsonb)
@@ -496,7 +497,7 @@ language plpgsql security definer set search_path = public, extensions as $$
 declare
   info jsonb := info_reservas();
   d date; k text; v jsonb; n int; total int := 0; det text := ''; limpio jsonb := '{}'::jsonb;
-  r reservas; o text := origen_peticion();
+  r reservas; o text := origen_peticion(); lim int := greatest(1, coalesce((info->>'por_persona')::int, 2));
 begin
   p_nombre := trim(coalesce(p_nombre,'')); p_telefono := regexp_replace(coalesce(p_telefono,''), '[^0-9+]', '', 'g');
   if not (info->>'abiertas')::boolean then raise exception 'Las reservas están cerradas por ahora'; end if;
@@ -532,8 +533,15 @@ begin
   if o is not null and (select count(*) from reservas where origen = o and creado > now() - interval '1 hour') >= 5 then
     raise exception 'Ya hiciste varias reservas seguidas. Si necesitas más pan, habla directo con el almacén';
   end if;
-  if p_telefono <> '' and (select count(*) from reservas where telefono = p_telefono and dia = d and estado = 'pendiente') >= 3 then
-    raise exception 'Ese celular ya tiene varias reservas para ese día. Si necesitas más pan, habla directo con el almacén';
+  -- Límite por persona y por día (lo elige la tienda): se cuenta por celular o por nombre, y las canceladas no cuentan
+  if (select count(*) from reservas where dia = d and estado <> 'cancelada'
+        and ((p_telefono <> '' and telefono = p_telefono) or lower(nombre) = lower(p_nombre))) >= lim then
+    raise exception 'Ya tienes % para ese día. Si necesitas más pan, habla directo con el almacén',
+      case when lim = 1 then 'una reserva' else lim || ' reservas' end;
+  end if;
+  -- y por conexión, con más margen porque varias casas pueden compartir la misma (por ejemplo, datos móviles)
+  if o is not null and (select count(*) from reservas where origen = o and dia = d and estado <> 'cancelada') >= greatest(lim * 3, 6) then
+    raise exception 'Desde aquí ya se hicieron muchas reservas para ese día. Si necesitas más pan, habla directo con el almacén';
   end if;
   insert into reservas (codigo, nombre, telefono, items, detalle, nota, dia, origen)
   values (upper(substr(encode(gen_random_bytes(3),'hex'),1,4)), p_nombre, p_telefono, limpio, det,

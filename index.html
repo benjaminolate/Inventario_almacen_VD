@@ -1365,6 +1365,9 @@ function openCountQty(p){
   show(); setTimeout(() => ($("#cqb") || $("#cqs"))?.focus(), 50);
 }
 function finishCount(){ run(async () => {
+  // Lo que se vende por unidad se cuenta en números enteros (los decimales son solo para lo que va por kilo)
+  const bad = Object.entries(ui.draft).map(([id, d]) => [P(id), d]).find(([p, d]) => p && !isKg(p) && !d.none && d.qty !== "" && d.qty != null && !Number.isInteger(+d.qty));
+  if (bad){ $(`[data-cq="${bad[0].id}"]`)?.focus(); return toast(`${bad[0].name} se cuenta por unidad: escribe un número entero`); }
   const { n, diffs } = await act.count(ui.draft);
   const now = Date.now();
   ui.draft = {};
@@ -1449,6 +1452,7 @@ function openProductForm(sector, code, cb){
     const name = $("#nn").value.trim(); if (!name){ $("#nn").focus(); return; }
     if (+$("#np").value < 0){ $("#np").focus(); return toast("El precio no puede ser negativo"); }
     if (+$("#nq").value < 0){ $("#nq").focus(); return toast("La cantidad no puede ser negativa"); }
+    if ($("#nu").value === "un" && $("#nq").value !== "" && !Number.isInteger(+$("#nq").value)){ $("#nq").focus(); return toast("Por unidad, la cantidad va sin decimales"); }
     const dup = codeTaken($("#nb").value.trim()); if (dup){ $("#nb").focus(); return toast(`Ese código de barras ya está en ${dup.name}`); }
     const p = await act.newProduct({ name, cat:$("#ns").value, price:+$("#np").value || 0, barcode:$("#nb").value.trim(), unit:$("#nu").value, atajo:$("#na").checked }, $("#nq").value);
     closeModal(); toast(`${name} agregado`);
@@ -1522,6 +1526,7 @@ function openCliente(c){
       <span class="diff" style="color:${i.type === "fiado" ? "var(--bad)" : "var(--ok)"}">${i.type === "fiado" ? "+" : "−"}${clp(i.amount)}</span></div>`).join("") || `<div class="empty">Sin movimientos.</div>`}</div></div>
   </div>`);
   const add = type => run(async () => { const a = Math.round(+$("#fm").value || 0); if (a <= 0){ $("#fm").focus(); return; }
+    if (a > 1000000){ $("#fm").focus(); return toast("Revisa el monto: el máximo por anotación es $1.000.000"); }
     const debe = saldo(c);
     if (type === "abono" && debe <= 0){ $("#fm").focus(); return toast(`${c.name.split(" ")[0]} no debe nada`); }
     if (type === "abono" && a > debe){ $("#fm").value = debe; $("#fm").focus(); return toast(`Debe ${clp(debe)}: el pago no puede ser mayor. Si pagó con más, dale el vuelto.`); }
@@ -1611,7 +1616,7 @@ function viewReservasDB(){
   const pend = rs.filter(r => r.estado === "pendiente");
   const tot = {}; pend.forEach(r => Object.entries(r.items || {}).forEach(([k,n]) => tot[k] = (tot[k]||0) + n));
   const totTxt = db.panes.map(b => b.nombre).concat(Object.keys(tot)).filter((k,i,a) => tot[k] && a.indexOf(k) === i).map(k => `${tot[k]} ${k.toLowerCase()}`).join(", ");
-  const abiertas = db.ajustes.reservas_abiertas !== false, lim = db.ajustes.reservas_hora_limite ?? 19;
+  const abiertas = db.ajustes.reservas_abiertas !== false, lim = db.ajustes.reservas_hora_limite ?? 19, porPersona = db.ajustes.reservas_por_persona ?? 2;
   const link = reservaLink(), msg = `🍞 Reserva tu pan en el almacén desde aquí: ${link}`;
   const count = d => forDay(d).filter(r => r.estado === "pendiente").length;
   return `<header class="top"><button class="btn sm" data-go="mas">← Regresar</button><span class="pill ${abiertas?"ok":"none"}">${abiertas?"Recibiendo reservas":"Reservas cerradas"}</span></header>
@@ -1628,6 +1633,8 @@ function viewReservasDB(){
       <label class="row"><input type="checkbox" id="ropen" ${abiertas?"checked":""}> Recibir reservas ahora</label>
       <div class="field"><label for="rlim">Reservas para el mismo día hasta las</label><select class="input" id="rlim">${Array.from({ length:18 }, (_, i) => i + 6).map(h => `<option value="${h}" ${h==lim?"selected":""}>${h}:00</option>`).join("")}</select></div>
       <p class="small muted" style="margin:0">Después de esa hora, los clientes solo pueden reservar para el día siguiente.</p>
+      <div class="field"><label for="rper">Reservas por persona al día</label><select class="input" id="rper">${[1,2,3,5].map(n => `<option value="${n}" ${n==porPersona?"selected":""}>${n === 1 ? "1 reserva" : n + " reservas"}</option>`).join("")}</select></div>
+      <p class="small muted" style="margin:0">Se cuenta por nombre y por celular. Las canceladas no cuentan. Para pedidos más grandes, el cliente tiene que hablar con el almacén.</p>
     </div>
   </div>`;
 }
@@ -2765,6 +2772,7 @@ function render(){
     $("#rcopy").onclick = () => { try { navigator.clipboard.writeText(reservaLink()).then(() => toast("Link copiado"), () => toast(reservaLink())); } catch(e){ toast(reservaLink()); } };
     $("#ropen").onchange = e => run(async () => { await act.setting("reservas_abiertas", e.target.checked); render(); toast(e.target.checked ? "Reservas abiertas" : "Reservas cerradas"); });
     $("#rlim").onchange = e => run(async () => { await act.setting("reservas_hora_limite", +e.target.value); toast("Hora guardada"); });
+    $("#rper").onchange = e => run(async () => { await act.setting("reservas_por_persona", +e.target.value); toast("Límite guardado"); });
   }
   if (v === "equipo"){
     $("#mypass").onclick = openMyPass;
@@ -2817,7 +2825,7 @@ function render(){
       ui.recv.provId = p.id; ui.recv.supplier = p.name; softRender(); });
     app.querySelectorAll("[data-rv]").forEach(i => i.onchange = () => { ui.recv.items[i.dataset.rv].vence = i.value; });
     $("#scan").onclick = () => openScanSheet(scanAction());
-    app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rq].qty = Math.max(0, r3(+i.value||0)); });
+    app.querySelectorAll("[data-rq]").forEach(i => i.oninput = () => { const l = ui.recv.items[i.dataset.rq]; l.qty = Math.max(0, isKg(P(l.pid)) ? r3(+i.value||0) : Math.round(+i.value||0)); });
     app.querySelectorAll("[data-rc]").forEach(i => i.oninput = () => { ui.recv.items[i.dataset.rc].cost = Math.max(0, +i.value||0); });
     app.querySelectorAll("[data-rq],[data-rc]").forEach(i => i.onchange = renderKeepFocus);
     app.querySelectorAll("[data-rbox]").forEach(i => i.onchange = () => { const l = ui.recv.items[i.dataset.rbox], n = Math.max(2, l.n || 12);
