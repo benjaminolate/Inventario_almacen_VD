@@ -614,7 +614,11 @@ create policy "miembros anotan fiados" on public.fiados for insert to authentica
 create policy "admin borra fiados"     on public.fiados for delete to authenticated using (es_admin());
 
 create policy "miembros ven ajustes"    on public.ajustes for select to authenticated using (es_miembro());
-create policy "miembros cambian ajustes" on public.ajustes for all to authenticated using (es_miembro()) with check (es_miembro());
+-- La configuración la cambia la administradora; cualquiera del equipo puede editar el aviso del pan y abrir o cerrar las reservas
+create policy "admin cambia ajustes"     on public.ajustes for all    to authenticated using (es_admin()) with check (es_admin());
+create policy "miembros agregan avisos"  on public.ajustes for insert to authenticated with check (es_miembro() and clave in ('mensaje_pan','reservas_abiertas'));
+create policy "miembros cambian avisos"  on public.ajustes for update to authenticated using (es_miembro() and clave in ('mensaje_pan','reservas_abiertas'))
+  with check (es_miembro() and clave in ('mensaje_pan','reservas_abiertas'));
 
 create policy "miembros ven panes"  on public.panes for select to authenticated using (es_miembro());
 create policy "admin cambia panes"  on public.panes for all to authenticated using (es_admin()) with check (es_admin());
