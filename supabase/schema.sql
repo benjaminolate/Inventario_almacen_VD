@@ -279,7 +279,7 @@ begin
   end if;
   insert into movimientos (producto_id, tipo, cantidad, precio, descuento, medio, grupo, usuario_id, at)
   select (i->>'producto_id')::uuid, 'venta', round((i->>'cantidad')::numeric, 3),
-         coalesce((i->>'precio')::int, p.precio), greatest(0, coalesce((i->>'descuento')::int, 0)),
+         greatest(0, coalesce((i->>'precio')::int, p.precio)), greatest(0, coalesce((i->>'descuento')::int, 0)),
          registrar_venta.medio, g, auth.uid(), t
   from jsonb_array_elements(items) i join productos p on p.id = (i->>'producto_id')::uuid
   where (i->>'cantidad')::numeric > 0;
@@ -502,10 +502,13 @@ declare
   d date; k text; v jsonb; n int; total int := 0; det text := ''; limpio jsonb := '{}'::jsonb;
   r reservas; o text := origen_peticion(); lim int := greatest(1, coalesce((info->>'por_persona')::int, 2));
 begin
-  p_nombre := trim(coalesce(p_nombre,'')); p_telefono := regexp_replace(coalesce(p_telefono,''), '[^0-9+]', '', 'g');
+  p_nombre := trim(coalesce(p_nombre,''));
+  -- Celular chileno: se guarda siempre como 9 números (sin +56), así el límite por persona no se salta cambiando el formato
+  p_telefono := regexp_replace(coalesce(p_telefono,''), '[^0-9]', '', 'g');
+  if char_length(p_telefono) = 11 and p_telefono like '56%' then p_telefono := substr(p_telefono, 3); end if;
   if not (info->>'abiertas')::boolean then raise exception 'Las reservas están cerradas por ahora'; end if;
   if char_length(p_nombre) < 2 or char_length(p_nombre) > 60 then raise exception 'Escribe tu nombre'; end if;
-  if char_length(p_telefono) > 20 then raise exception 'Teléfono no válido'; end if;
+  if p_telefono <> '' and char_length(p_telefono) <> 9 then raise exception 'El celular debe tener 9 números, por ejemplo 9 1234 5678'; end if;
   if p_para = 'hoy' then
     if (info->>'hora_chile')::int >= (info->>'hora_limite')::int then raise exception 'Ya no se reciben reservas para hoy, elige mañana'; end if;
     d := hoy_chile();

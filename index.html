@@ -625,7 +625,7 @@ function flushOutbox(){
         if (!isFinalErr(e)) break;
         outbox.drop(it.id); S.movs = S.movs.filter(m => !(m.pending && m.id.startsWith(it.id + "-")));
         try { const f = JSON.parse(localStorage.getItem(OUTBOX_KEY + "-fallidas")) || []; f.push({ ...it, error:e.message }); localStorage.setItem(OUTBOX_KEY + "-fallidas", JSON.stringify(f)); } catch(x){}
-        toast(`No se pudo guardar ${it.kind === "venta" ? "una venta" : "un fiado"} hecho sin internet: ${friendly(e)}`);
+        toast(`No se pudo guardar ${it.kind === "venta" ? "una venta hecha" : "un fiado hecho"} sin internet: ${friendly(e)}`);
       }
     }
     return !outbox.list().length;
