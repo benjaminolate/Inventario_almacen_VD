@@ -145,6 +145,9 @@ do $$ begin
   if not exists (select 1 from perfiles where maestra) then
     update perfiles set maestra = true
      where id = (select id from perfiles where rol = 'admin' and activo order by creado limit 1);
+    -- Revisa ya el aviso pendiente de cuidar_admins: si queda para el final,
+    -- el SQL Editor (que corre todo junto) no deja hacer "alter table perfiles" más abajo
+    set constraints public.al_cambiar_perfil immediate;
   end if;
 end $$;
 
