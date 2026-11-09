@@ -899,10 +899,13 @@ function scanAction(){
 }
 // Pistola de códigos (USB o Bluetooth): escribe el número muy rápido y termina con Enter.
 // Se reconoce por la velocidad, así que funciona sin tocar nada en pantalla.
-const wedge = { buf:"", t:0 };
+// En iPhone el Bluetooth entrega las teclas más espaciadas (unos 30 a 60 ms entre cada una, a veces de a tirones),
+// así que se mira el promedio de la lectura completa y no solo cada tecla. Una persona escribiendo va mucho más lento.
+const wedge = { buf:"", t:0, t0:0 };
 document.addEventListener("keydown", e => {
   if (e.key === "Enter"){
-    const code = wedge.buf, fast = e.timeStamp - wedge.t < 100; wedge.buf = "";
+    const code = wedge.buf, avg = code.length > 1 ? (wedge.t - wedge.t0) / (code.length - 1) : 0;
+    const fast = e.timeStamp - wedge.t < 250 && avg < 80; wedge.buf = "";
     if (!fast || code.length < 6) return;
     const t = e.target, sheet = ui.scanCb;
     // En un campo de código de barras el número se queda escrito ahí
@@ -913,7 +916,8 @@ document.addEventListener("keydown", e => {
     const cb = sheet || ($("#modalroot").innerHTML ? null : scanAction());
     if (cb) handleCode(code, cb); else toast($("#modalroot").innerHTML ? "Cierra esta ventana para escanear" : "Para escanear, abre Vender, Recibir o Contar");
   } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey){
-    if (e.timeStamp - wedge.t > 50) wedge.buf = "";
+    if (e.timeStamp - wedge.t > 200) wedge.buf = "";
+    if (!wedge.buf) wedge.t0 = e.timeStamp;
     wedge.buf += e.key; wedge.t = e.timeStamp;
   }
 }, true);
